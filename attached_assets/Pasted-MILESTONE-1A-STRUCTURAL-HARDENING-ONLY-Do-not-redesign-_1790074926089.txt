@@ -1,0 +1,33 @@
+MILESTONE 1A — STRUCTURAL HARDENING ONLY
+
+Do not redesign the UI and do not begin Milestone 2.
+
+The Milestone 1 shell has been preserved in GitHub branch:
+
+milestone-1-shell
+
+Perform a structural portability audit and make only the minimum changes necessary to ensure the mobile application is independently reproducible outside Replit.
+
+Specifically:
+
+1. Remove or replace @workspace/api-client-react if the mobile shell depends on it. The mobile app must not require a Replit workspace package.
+2. Replace catalog: dependency references such as @tanstack/react-query and zod with explicit compatible versions if they are required. Remove them entirely if unused.
+3. Audit declared dependencies and remove unused packages, especially sensitive-capability packages such as expo-location unless the current Milestone 1 shell actually requires them.
+4. Confirm that .replit-artifact, preview servers, landing-page scripts, and other Replit-specific tooling are development conveniences only and are not imported by or required for the production mobile application.
+5. Do not add any backend, database, provider SDK, analytics, subscription SDK, or production service.
+6. Preserve all existing temporary-chat privacy boundaries.
+7. Run TypeScript checks and all existing tests after cleanup.
+8. Verify that artifacts/kalillac-mobile can be installed and started from a normal GitHub checkout using standard package-management/Expo commands without requiring Replit runtime services.
+9. Do not change the visual design except where necessary to fix breakage caused by dependency cleanup.
+10. Stop when this audit is complete.
+
+At the end, report:
+
+* dependencies removed
+* dependencies retained and why
+* any Replit-specific runtime dependency still remaining
+* exact commands needed to install/run from a clean GitHub checkout
+* TypeScript/test results
+* confirmation that temporary chat content still has no persistence path
+
+Do not proceed to UI redesign, encrypted saved chats, APIs, subscriptions, or backend work.
