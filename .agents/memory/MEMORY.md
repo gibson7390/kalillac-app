@@ -1,0 +1,1 @@
+- [React Native Markdown dependencies](markdown-renderer.md) — Metro-safe Markdown requires a parser release that avoids Node-core `punycode`; validate the actual iOS bundle, not package metadata alone.

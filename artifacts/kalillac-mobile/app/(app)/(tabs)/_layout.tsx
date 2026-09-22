@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { BlurView } from 'expo-blur';
 import { Platform, StyleSheet } from 'react-native';
 

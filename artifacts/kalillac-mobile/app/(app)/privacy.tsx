@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Spacing } from '@/constants/Theme';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { router } from 'expo-router';
 
 export default function PrivacyScreen() {

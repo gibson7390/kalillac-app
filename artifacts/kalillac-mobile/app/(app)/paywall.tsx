@@ -5,7 +5,7 @@ import { useSubscription } from '@/contexts/SubscriptionContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Button } from '@/components/Button';
 import { Spacing, Radii } from '@/constants/Theme';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { router } from 'expo-router';
 
 export default function PaywallScreen() {
