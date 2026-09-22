@@ -1,0 +1,91 @@
+BEGIN TASK #4 — KALILLAC PORTABILITY HARDENING
+
+Proceed with the already-audited Milestone 1A portability cleanup now.
+
+This is an implementation pass, not another planning pass.
+
+Keep the current UI and interaction design unchanged.
+
+Make only the structural portability changes already identified:
+
+1. Remove @workspace/api-client-react from artifacts/kalillac-mobile/package.json, tsconfig.json, imports, aliases, and any related configuration. The mobile app must not depend on any Replit workspace package.
+2. Remove @tanstack/react-query if it is only an empty/unused wrapper and not required by the current shell.
+3. Remove unused scaffold/runtime dependencies that are not used by the current Milestone 1 shell, including:
+    * expo-location
+    * expo-image-picker
+    * expo-crypto
+    * zod
+    * and any other clearly unused dependency discovered by the import audit
+
+Do not remove a dependency that is actually imported or required by the current app.
+
+4. Remove or replace any Replit-only development script requirements that prevent the mobile package from installing or starting from a normal GitHub checkout.
+
+Replit-specific preview helpers may remain only if they are optional development conveniences and are not imported by or required for the mobile application runtime.
+
+5. Preserve the existing test files exactly where they are:
+
+artifacts/kalillac-mobile/tests/snapshot.test.ts
+
+artifacts/kalillac-mobile/tests/stream.test.ts
+
+Do not move or rename them.
+
+6. Preserve the approved privacy boundaries exactly:
+
+* temporary conversations remain memory-only
+* saved snapshots remain memory-only in this milestone
+* only approved non-content preferences may use AsyncStorage
+* no filesystem persistence for chat content
+* no SQLite
+* no SecureStore
+* no database
+* no query-cache persistence
+* no prompt/response logging
+* no diagnostics containing conversation content
+
+7. Do not add:
+
+* backend code
+* FastAPI
+* OpenAI
+* Groq
+* Brave
+* Tavily
+* RevenueCat
+* StoreKit
+* Supabase
+* analytics
+* authentication
+* encrypted durable saved chats
+* cloud sync
+* new product features
+
+8. Verify that the mobile package can be reproduced outside Replit from the GitHub checkout using standard package-manager and Expo commands.
+
+The production/mobile runtime must not require Replit services.
+
+9. After cleanup, run:
+
+* dependency installation verification
+* TypeScript check
+* all existing Jest tests
+* Expo/Metro startup smoke test
+
+10. Do not redesign or restyle the UI during this task except where required to repair breakage caused directly by dependency cleanup.
+11. Stop after Task #4 is complete.
+
+At completion, report:
+
+* exact files changed
+* dependencies removed
+* dependencies retained and why
+* any Replit-specific files/tools still present
+* whether any Replit-specific runtime dependency remains
+* exact clean-checkout install/run commands
+* TypeScript result
+* Jest result
+* Expo/Metro smoke-test result
+* confirmation that temporary chat content still has no persistence path
+
+Proceed now with implementation.
