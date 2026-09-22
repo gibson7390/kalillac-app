@@ -4,5 +4,5 @@ module.exports = {
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true, tsconfig: { outDir: './dist', rootDir: './' } }],
   },
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/tests/**/*.test.ts'],
 };
