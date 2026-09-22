@@ -1,0 +1,300 @@
+MILESTONE 1B — PREMIUM UI & PRODUCT REFINEMENT
+
+The completed audit is here:
+
+audit/kalillac-premium-mobile-shell-audit.md
+
+The approved Kalillac brand assets are now available at:
+
+artifacts/kalillac-mobile/assets/brand/kalillac-wordmark.png
+
+artifacts/kalillac-mobile/assets/brand/kalillac-mark.png
+
+Implement one coordinated premium-quality refinement pass across the existing Kalillac mobile shell.
+
+The goal is to make Kalillac feel like a polished, privacy-first commercial AI product rather than a scaffold, demo, generic AI template, or collection of oversized cards.
+
+Do not begin Milestone 2.
+
+Preserve these architectural boundaries
+
+Preserve:
+
+* temporary chats as memory-only
+* explicit save-snapshot semantics
+* current mock AI transport
+* current navigation model unless a minor presentation adjustment is necessary
+* Auto / Fast / Smart / Deep concepts
+* dark and light themes
+* existing Markdown security behavior
+* blocked remote Markdown images
+* blocked raw HTML
+* user-confirmed external links
+* current portability outside Replit
+* all existing tests
+
+Do not add persistent chat storage or any production backend integration.
+
+1. Kalillac branding
+
+Integrate the supplied Kalillac assets deliberately.
+
+Use:
+
+* kalillac-wordmark.png for major brand moments such as onboarding or another appropriate primary-brand surface
+* kalillac-mark.png for compact identity where appropriate
+
+Do not place logos on every screen.
+
+Do not replace the existing Expo/native application icon yet.
+
+Build the visual system around Kalillac’s existing deep-navy and electric-blue identity.
+
+Avoid excessive gradients, neon, glass effects, decorative blur, or visual noise.
+
+2. Onboarding
+
+Make onboarding feel intentional, premium, and privacy-first.
+
+Clearly communicate:
+
+Private by default. Save only what you choose.
+
+Do not make privacy claims stronger than the current implementation supports.
+
+Specifically avoid implying:
+
+* guaranteed secure memory erasure
+* zero provider retention
+* encrypted durable saved chats
+* end-to-end encryption
+* that no server/provider processes content
+
+Keep the explanation concise enough that onboarding does not feel like a legal document.
+
+3. Home
+
+The audit identified the current six large task cards as too dense and too similar to a generic AI template.
+
+Preserve all six entry points:
+
+* Research
+* Study
+* Analyze
+* Code
+* Create
+* Search
+
+Redesign their presentation so Home is:
+
+* lighter
+* easier to scan
+* visually distinctive
+* less card-heavy
+* clearly Kalillac
+
+Starting a normal new conversation should remain immediately obvious and visually primary.
+
+Do not remove capabilities simply to simplify the page.
+
+4. Chat screen
+
+Treat chat as the core product experience.
+
+Improve:
+
+* message hierarchy
+* response readability
+* whitespace
+* composer
+* keyboard-adjacent layout
+* temporary-chat indicator
+* Auto / Fast / Smart / Deep controls
+* streaming/loading state
+* Stop
+* Retry where appropriate
+* Copy
+* Share
+* Save
+* Update saved copy
+
+Secondary actions should remain discoverable without visually competing with the conversation.
+
+5. Error handling
+
+The audit found that simulated failures can resemble normal assistant messages.
+
+Change the presentation so failed requests are clearly recognizable as errors and provide a useful retry/recovery action.
+
+Do not add a real backend or network service.
+
+6. Temporary conversation behavior
+
+The audit found that starting a New Conversation may clear unrelated temporary sessions.
+
+Fix this in the current in-memory architecture.
+
+Starting one new temporary conversation must not unexpectedly destroy other active temporary conversations.
+
+Do not introduce persistence.
+
+Temporary content remains memory-only.
+
+7. Accessibility and ergonomics
+
+Correct small tap targets identified by the audit, especially:
+
+* mode controls
+* modal close controls
+* small icon actions
+
+Use normal iOS touch ergonomics.
+
+Ensure the layouts remain usable at both previously audited viewport sizes:
+
+* 390×844
+* 430×932
+
+Preserve reasonable Dynamic Type resilience where possible without redesigning the entire type system.
+
+8. Settings
+
+Settings should look like a customer product, not a developer test harness.
+
+Development/demo controls for:
+
+* simulated offline mode
+* API errors
+* saved-state corruption
+* simulated purchases
+
+must not appear in normal customer-facing presentation.
+
+Preserve these capabilities for development by gating them behind development-only behavior rather than deleting useful testing mechanisms.
+
+9. Kalillac Plus
+
+Refine the mock Plus/paywall presentation so it looks premium and consistent with Kalillac.
+
+Purchase behavior remains simulated.
+
+Do not add:
+
+* StoreKit
+* RevenueCat
+* Stripe
+* real entitlements
+
+Do not present provisional pricing as a production commitment.
+
+Clearly keep this milestone in demo/mock state internally.
+
+10. Saved
+
+Improve the Saved experience visually while preserving the current semantics:
+
+* saving creates an explicit snapshot
+* continuing the temporary conversation does not silently update that snapshot
+* Update saved copy remains explicit
+* saved chats remain memory-only in this milestone
+
+Do not make the interface imply encrypted or durable storage yet.
+
+11. Privacy and provider screens
+
+Make Privacy and AI Providers visually consistent with the rest of the app.
+
+Keep provider information clear but secondary so it does not overwhelm ordinary users.
+
+Preserve honest trust-boundary language.
+
+Do not imply that provider processing has already been configured for ZDR or production retention guarantees.
+
+12. Visual consistency
+
+Refine the whole shell as one design system:
+
+* typography hierarchy
+* spacing rhythm
+* corner radii
+* icon sizing
+* dividers
+* surfaces
+* empty states
+* loading states
+* modal treatment
+* light/dark consistency
+
+Avoid:
+
+* giant cards
+* excessive gradients
+* excessive glass/blur
+* neon decoration
+* generic AI-dashboard styling
+* copying ChatGPT’s visual identity
+* unnecessary visual complexity
+
+The app should feel distinctly Kalillac.
+
+Explicitly out of scope
+
+Do not add or integrate:
+
+* OpenAI
+* Groq
+* any real AI provider
+* FastAPI/backend services
+* web search APIs
+* Supabase
+* databases
+* durable chat persistence
+* SecureStore/Keychain
+* CryptoKit
+* authentication
+* RevenueCat
+* StoreKit
+* Stripe
+* analytics
+* cloud sync
+* image generation
+* voice
+* agents
+
+Do not modify GitHub main.
+
+Verification
+
+After implementation:
+
+* run TypeScript
+* run the complete Jest suite
+* run expo install --check
+* run Expo Doctor
+* run native iOS Metro bundle verification
+* run the existing web/preview smoke test
+* inspect onboarding, Home, chat, Saved, Settings, Privacy, Providers and Plus/paywall at 390×844 and 430×932
+* inspect both light and dark themes
+* verify development/demo controls are absent from normal customer-facing presentation
+* verify temporary chats still have no persistence path
+* verify saved snapshots remain memory-only
+* verify all Markdown security regression tests remain passing
+
+At completion provide:
+
+* exact files changed
+* screens refined
+* major design decisions
+* brand asset usage
+* privacy-copy changes
+* temporary-session behavior changes
+* development/demo controls gated
+* accessibility fixes
+* TypeScript result
+* Jest result
+* Expo Doctor result
+* iOS Metro bundle result
+* web-preview result
+* any unresolved issues
+
+Stop after this refinement pass. Do not begin Milestone 2.
