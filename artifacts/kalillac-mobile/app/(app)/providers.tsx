@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Spacing, Radii } from '@/constants/Theme';
@@ -12,38 +12,72 @@ export default function ProvidersScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.closeRow}>
-          <Ionicons name="close" size={28} color={colors.text} onPress={() => router.back()} />
+          <TouchableOpacity 
+            onPress={() => router.back()} 
+            style={styles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
+            <Ionicons name="close" size={24} color={colors.text} />
+          </TouchableOpacity>
         </View>
-        <ThemedText variant="h1" style={styles.title}>Planned providers</ThemedText>
-        <ThemedText variant="body" style={styles.title}>Milestone 1 preview: no AI or search provider is connected. All answers and citations are simulated. The plans below are not active capabilities or verified retention guarantees.</ThemedText>
+        <ThemedText variant="h1" style={styles.title}>AI Providers</ThemedText>
+        <ThemedText variant="body" color="secondary" style={styles.subtitle}>
+          Milestone 1B preview: No AI or search provider is connected. All answers are simulated. 
+        </ThemedText>
         
-        <View style={[styles.card, { backgroundColor: colors.surfaceSecondary }]}>
-          <ThemedText variant="h2">Groq</ThemedText>
-          <ThemedText variant="bodySm" color="secondary">Planned for Fast mode</ThemedText>
-          <ThemedText variant="caption" style={styles.mt}>Groq gpt-oss-120b is the planned model. Availability and Zero Data Retention eligibility and configuration must be verified before production traffic. Nothing is configured in this preview.</ThemedText>
-        </View>
+        <ProviderCard 
+          name="Groq" 
+          role="Fast mode" 
+          status="Planned"
+          description="Groq Llama model is planned. Zero Data Retention eligibility must be verified before production. Nothing is configured in this preview." 
+        />
 
-        <View style={[styles.card, { backgroundColor: colors.surfaceSecondary }]}>
-          <ThemedText variant="h2">OpenAI</ThemedText>
-          <ThemedText variant="bodySm" color="secondary">Planned for Smart and Deep modes</ThemedText>
-          <ThemedText variant="caption" style={styles.mt}>Exact model availability and privacy terms remain unverified. Future temporary requests are planned to use store=false where supported. That flag is not a zero-retention guarantee. No OpenAI requests occur here.</ThemedText>
-        </View>
+        <ProviderCard 
+          name="OpenAI" 
+          role="Smart & Deep modes" 
+          status="Planned"
+          description="Model availability and privacy terms remain unverified. Temporary requests are planned to use store=false where supported. No OpenAI requests occur here." 
+        />
         
-        <View style={[styles.card, { backgroundColor: colors.surfaceSecondary }]}>
-          <ThemedText variant="h2">Brave Search</ThemedText>
-          <ThemedText variant="bodySm" color="secondary">Preferred future search option</ThemedText>
-          <ThemedText variant="caption" style={styles.mt}>Subject to commercial and privacy review, with Tavily as an alternative. The planned integration sends a minimized query, never the full conversation. This preview performs no search.</ThemedText>
-        </View>
+        <ProviderCard 
+          name="Search (TBD)" 
+          role="Research feature" 
+          status="Planned"
+          description="Subject to commercial and privacy review. The planned integration sends a minimized query, never the full conversation. This preview performs no live search." 
+        />
       </ScrollView>
+    </View>
+  );
+}
+
+function ProviderCard({ name, role, status, description }: { name: string, role: string, status: string, description: string }) {
+  const { colors } = usePreferences();
+  return (
+    <View style={[styles.card, { backgroundColor: colors.surfaceSecondary }]}>
+      <View style={styles.cardHeader}>
+        <View>
+          <ThemedText variant="h2">{name}</ThemedText>
+          <ThemedText variant="bodySm" color="secondary">{role}</ThemedText>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: colors.surface }]}>
+          <ThemedText variant="caption" color="secondary">{status}</ThemedText>
+        </View>
+      </View>
+      <ThemedText variant="caption" color="secondary" style={styles.mt}>{description}</ThemedText>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { padding: Spacing.lg },
-  closeRow: { alignItems: 'flex-end', marginBottom: Spacing.lg },
-  title: { marginBottom: Spacing.lg },
-  card: { padding: Spacing.md, borderRadius: Radii.lg, marginBottom: Spacing.md },
-  mt: { marginTop: Spacing.sm },
+  scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
+  closeRow: { alignItems: 'flex-end', marginBottom: Spacing.md },
+  closeBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { marginBottom: Spacing.sm },
+  subtitle: { marginBottom: Spacing.xl, lineHeight: 22 },
+  card: { padding: Spacing.lg, borderRadius: Radii.lg, marginBottom: Spacing.md },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: Radii.sm },
+  mt: { marginTop: Spacing.md, lineHeight: 20 },
 });

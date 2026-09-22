@@ -1,0 +1,79 @@
+TASK #17 — FINAL ACCEPTANCE CORRECTIONS ONLY
+
+Do not begin a new milestone. Do not broaden scope. Fix only the three unresolved acceptance issues identified in the Task #17 completion report.
+
+1. Remove the raster wordmark treatment
+
+The current onboarding/Home branding still renders kalillac-wordmark.png directly as a small rectangular raster image. This is not accepted.
+
+Remove that raster wordmark treatment from customer-facing Home and onboarding.
+
+Build the in-app brand lockup with native React Native text:
+
+Light theme
+
+* Kalillac using the existing deep-navy/dark primary text
+* AI using the existing electric-blue brand accent
+
+Dark theme
+
+* Kalillac using the existing high-contrast near-white primary text
+* AI using the existing electric-blue brand accent
+
+The standalone kalillac-mark.png may be used only where its existing colors have sufficient contrast.
+
+Do not recolor, stretch, crop, or overwrite the source logo files.
+
+If the dark-navy mark is not sufficiently visible on the dark theme, omit the mark on that surface for now rather than adding a box, filter, or improvised recoloring. A separately approved dark-theme mark asset can be added later.
+
+Preserve kalillac-wordmark.png and kalillac-mark.png in the asset library.
+
+2. Make retained temporary chats resumable
+
+The current state model correctly preserves unrelated temporary conversations in memory, but users cannot see or resume them after leaving a chat.
+
+Add a simple, customer-understandable way to access currently active temporary conversations during the current app session.
+
+Requirements:
+
+* temporary conversations remain memory-only
+* do not add AsyncStorage, SecureStore, database persistence, cloud sync, or history storage
+* do not imply that these conversations survive app reload/restart
+* do not turn temporary chats into durable history
+* keep the interaction lightweight and consistent with the existing navigation
+
+This is session-level resumability only.
+
+3. Correct stream cancellation lifecycle
+
+If a user navigates away while a mock response is streaming:
+
+* stop the transport
+* mark that retained response/request as cancelled/interrupted
+* do not leave it appearing as completed
+* expose the existing retry/recovery path when the conversation is resumed
+* prevent late streaming deltas after cancellation
+
+Preserve the current in-memory mock transport architecture.
+
+Verification
+
+After these corrections:
+
+* run TypeScript
+* run the complete Jest suite
+* add focused regression coverage for temporary-session resumability and navigation-during-stream cancellation if not already covered
+* run expo install --check
+* run Expo Doctor
+* run iOS Metro bundle verification
+* run web/preview smoke verification
+* inspect Home and onboarding in light and dark themes
+* confirm no small raster wordmark remains in customer-facing Home/onboarding
+* confirm active temporary conversations can be resumed during the current session
+* confirm those conversations still disappear after reload
+* confirm interrupted streams are visibly cancelled/retryable
+* confirm no new persistence path was introduced
+
+Report exact files changed and all verification results.
+
+Stop after these corrections. Do not begin Milestone 2.

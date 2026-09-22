@@ -27,18 +27,20 @@ export default function SettingsTab() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <ThemedText variant="h2" style={styles.header}>Settings</ThemedText>
 
-        <View style={styles.section}>
-          <TouchableOpacity style={[styles.row, { backgroundColor: colors.surfaceSecondary }]} onPress={() => router.push('/paywall')}>
-            <View style={styles.rowIcon}><Ionicons name="star" size={20} color={colors.accent} /></View>
-            <View style={{ flex: 1 }}>
-              <ThemedText variant="body" weight="medium">Kalillac Plus</ThemedText>
-              <ThemedText variant="caption" color="secondary">
-                {status === 'plus' ? 'Active Subscription' : 'Upgrade for advanced models'}
-              </ThemedText>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
-          </TouchableOpacity>
-        </View>
+        {__DEV__ && (
+          <View style={styles.section}>
+            <TouchableOpacity style={[styles.row, { backgroundColor: colors.surfaceSecondary }]} onPress={() => router.push('/paywall')}>
+              <View style={styles.rowIcon}><Ionicons name="star" size={20} color={colors.accent} /></View>
+              <View style={{ flex: 1 }}>
+                <ThemedText variant="body" weight="medium">Kalillac Plus</ThemedText>
+                <ThemedText variant="caption" color="secondary">
+                  {status === 'plus' ? 'Active Subscription' : 'Upgrade for advanced models (Demo)'}
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.section}>
           <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>PREFERENCES</ThemedText>
@@ -49,6 +51,7 @@ export default function SettingsTab() {
                 value={themeMode === 'dark'} 
                 onValueChange={(val) => setThemeMode(val ? 'dark' : 'light')} 
                 trackColor={{ true: colors.accent }}
+                accessibilityLabel="Dark mode"
               />
             </View>
             <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
@@ -57,6 +60,7 @@ export default function SettingsTab() {
                 value={hapticsEnabled} 
                 onValueChange={setHapticsEnabled} 
                 trackColor={{ true: colors.accent }}
+                accessibilityLabel="Haptics"
               />
             </View>
             <View style={styles.row}>
@@ -65,6 +69,7 @@ export default function SettingsTab() {
                 value={reduceMotion} 
                 onValueChange={setReduceMotion} 
                 trackColor={{ true: colors.accent }}
+                accessibilityLabel="Reduce motion"
               />
             </View>
           </View>
@@ -82,41 +87,46 @@ export default function SettingsTab() {
               <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.row} onPress={handleClearTemp}>
-              <ThemedText variant="body" color="error">Clear Temporary Chats Now</ThemedText>
+              <ThemedText variant="body" color="error">Clear Temporary Chats</ThemedText>
             </TouchableOpacity>
           </View>
         </View>
-        <View style={styles.section}>
-          <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>DEVELOPER / DEMO</ThemedText>
-          <View style={[styles.group, { backgroundColor: colors.surfaceSecondary }]}>
-            <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
-              <ThemedText variant="body">Simulate Offline Mode</ThemedText>
-              <Switch 
-                value={offlineMode} 
-                onValueChange={setOfflineMode} 
-                trackColor={{ true: colors.accent }}
-              />
+
+        {__DEV__ && (
+          <View style={styles.section}>
+            <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>DEVELOPER / DEMO</ThemedText>
+            <View style={[styles.group, { backgroundColor: colors.surfaceSecondary }]}>
+              <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+                <ThemedText variant="body">Simulate Offline Mode</ThemedText>
+                <Switch 
+                  value={offlineMode} 
+                  onValueChange={setOfflineMode} 
+                  trackColor={{ true: colors.accent }}
+                  accessibilityLabel="Simulate offline mode"
+                />
+              </View>
+              <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+                <ThemedText variant="body">Simulate API Errors</ThemedText>
+                <Switch 
+                  value={apiErrorMode} 
+                  onValueChange={setApiErrorMode} 
+                  trackColor={{ true: colors.accent }}
+                  accessibilityLabel="Simulate API errors"
+                />
+              </View>
+              <TouchableOpacity style={styles.row} onPress={() => {
+                if (savedSessions.length === 0) {
+                  Alert.alert('No Saved Chats', 'Create a saved chat first to test corruption.');
+                  return;
+                }
+                corruptRandomSession();
+                Alert.alert('Simulated', 'The most recent saved chat state is randomly corrupted. Opening it will show an error.');
+              }}>
+                <ThemedText variant="body" color="error">Simulate Saved Chat Corruption</ThemedText>
+              </TouchableOpacity>
             </View>
-            <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
-              <ThemedText variant="body">Simulate API Errors</ThemedText>
-              <Switch 
-                value={apiErrorMode} 
-                onValueChange={setApiErrorMode} 
-                trackColor={{ true: colors.accent }}
-              />
-            </View>
-            <TouchableOpacity style={styles.row} onPress={() => {
-              if (savedSessions.length === 0) {
-                Alert.alert('No Saved Chats', 'Create a saved chat first to test corruption.');
-                return;
-              }
-              corruptRandomSession();
-              Alert.alert('Simulated', 'The most recent saved chat state is randomly corrupted. Opening it will show an error.');
-            }}>
-              <ThemedText variant="body" color="error">Simulate Saved Chat Corruption</ThemedText>
-            </TouchableOpacity>
           </View>
-        </View>
+        )}
       </ScrollView>
     </View>
   );

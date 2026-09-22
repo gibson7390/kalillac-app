@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useChatRepository, ChatSession } from '@/contexts/ChatRepositoryContext';
@@ -7,11 +7,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
 import { router } from 'expo-router';
+import { Button } from '@/components/Button';
 
 export default function SavedTab() {
   const { colors } = usePreferences();
   const insets = useSafeAreaInsets();
-  const { savedSessions, deleteSavedSession, continueSavedSession } = useChatRepository();
+  const { savedSessions, deleteSavedSession, continueSavedSession, createSession } = useChatRepository();
 
   const handleOpen = async (id: string) => {
     try {
@@ -26,35 +27,57 @@ export default function SavedTab() {
   };
 
   const handleDelete = (id: string) => {
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm('Delete this saved snapshot? This cannot be undone.')) {
+        deleteSavedSession(id);
+      }
+      return;
+    }
+
     Alert.alert('Delete Saved Chat', 'Are you sure? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => deleteSavedSession(id) }
     ]);
   };
 
+  const handleStart = () => {
+    const id = createSession();
+    router.push(`/chat/${id}`);
+  };
+
   const renderItem = ({ item }: { item: ChatSession }) => (
-    <TouchableOpacity
-      activeOpacity={0.7}
-      onPress={() => handleOpen(item.id)}
-      onLongPress={() => handleDelete(item.id)}
-      style={[styles.item, { borderBottomColor: colors.border }]}
-    >
-      <View style={styles.itemContent}>
-        <ThemedText variant="body" weight="medium" numberOfLines={1}>{item.title}</ThemedText>
-        <ThemedText variant="caption" color="secondary" style={{ marginTop: 4 }}>
-          {new Date(item.updatedAt).toLocaleDateString()} • {item.messages.length} messages
-        </ThemedText>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
-    </TouchableOpacity>
+    <View style={[styles.item, { borderBottomColor: colors.border }]}>
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => handleOpen(item.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Open saved chat: ${item.title}`}
+        style={styles.itemTouch}
+      >
+        <View style={styles.itemContent}>
+          <ThemedText variant="body" weight="medium" numberOfLines={1}>{item.title}</ThemedText>
+          <ThemedText variant="caption" color="secondary" style={{ marginTop: 4 }}>
+            Snapshot • {new Date(item.updatedAt).toLocaleDateString()} • {item.messages.length} messages
+          </ThemedText>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity 
+        style={styles.deleteBtn}
+        onPress={() => handleDelete(item.id)}
+        accessibilityRole="button"
+        accessibilityLabel="Delete snapshot"
+      >
+        <Ionicons name="trash-outline" size={20} color={colors.error} />
+      </TouchableOpacity>
+    </View>
   );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <ThemedText variant="h2">Saved Chats</ThemedText>
+        <ThemedText variant="h2">Saved Snapshots</ThemedText>
         <ThemedText variant="bodySm" color="secondary" style={{ marginTop: 4 }}>
-          Memory-only saved state (V1 local persistence placeholder). Copies will vanish on app reload.
+          Memory-only state. Copies vanish on app reload. 
         </ThemedText>
       </View>
 
@@ -66,9 +89,10 @@ export default function SavedTab() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="bookmark-outline" size={48} color={colors.textTertiary} />
-            <ThemedText variant="body" color="secondary" style={{ marginTop: Spacing.md }}>
-              No saved chats yet.
+            <ThemedText variant="body" color="secondary" style={{ marginTop: Spacing.md, marginBottom: Spacing.xl }}>
+              You haven't saved any snapshots yet.
             </ThemedText>
+            <Button title="Start a conversation" onPress={handleStart} variant="secondary" />
           </View>
         }
       />
@@ -83,9 +107,17 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  itemTouch: {
+    flex: 1,
+    padding: Spacing.lg,
+  },
   itemContent: { flex: 1, paddingRight: Spacing.md },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  deleteBtn: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.xl },
 });

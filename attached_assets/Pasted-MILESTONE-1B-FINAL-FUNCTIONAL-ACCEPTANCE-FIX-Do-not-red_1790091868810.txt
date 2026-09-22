@@ -1,0 +1,72 @@
+MILESTONE 1B — FINAL FUNCTIONAL ACCEPTANCE FIX
+
+Do not redesign the application and do not begin Milestone 2.
+
+The explicit memory-only Save / Saved Snapshot behavior is working and must be preserved.
+
+Fix the current delete functionality and verify the complete snapshot/session behavior.
+
+1. Saved snapshot deletion
+
+The trash/delete control on the Saved Snapshots screen currently does not reliably delete the selected saved snapshot.
+
+Fix it so:
+
+* tapping Delete targets only the selected saved snapshot
+* present an appropriate confirmation before destructive deletion
+* confirming removes that snapshot immediately from the in-memory saved-snapshot repository
+* cancelling changes nothing
+* deleting one snapshot never deletes another snapshot
+* deleting a saved snapshot does not delete the related active temporary conversation
+* no persistence is introduced
+
+2. Temporary-chat deletion
+
+Verify the trash control in an active temporary conversation separately.
+
+It should:
+
+* require confirmation
+* delete only that temporary conversation from the current in-memory session
+* stop any active stream for that conversation
+* prevent late streaming chunks
+* return the user to an appropriate screen
+* leave unrelated temporary conversations intact
+* leave any explicitly saved snapshot intact unless the user separately deletes that saved snapshot
+
+3. Preserve Save semantics
+
+Do not change the accepted behavior:
+
+* Save creates an explicit snapshot
+* continuing the temporary conversation does not silently alter the snapshot
+* Update saved copy remains explicit
+* saved snapshots remain memory-only in this milestone
+* reload still clears them
+
+4. Regression tests
+
+Add focused tests proving:
+
+* deleting one saved snapshot removes only that snapshot
+* cancelling deletion leaves it intact
+* deleting a temporary conversation does not remove its saved snapshot
+* deleting a saved snapshot does not remove its temporary conversation
+* unrelated sessions/snapshots remain intact
+
+Verification
+
+Run:
+
+* TypeScript
+* complete Jest suite
+* expo install --check
+* Expo Doctor
+* iOS Metro export
+* preview smoke test
+
+Manually verify Saved deletion and temporary-chat deletion in the preview.
+
+Confirm no AsyncStorage, SecureStore, database, backend, or other chat-content persistence path was added.
+
+Stop after this correction and provide the exact files changed and verification results.

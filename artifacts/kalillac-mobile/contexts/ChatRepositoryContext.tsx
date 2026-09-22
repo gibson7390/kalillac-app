@@ -3,6 +3,24 @@ import { generateId } from '../utils/uuid';
 import { createSnapshot } from '../utils/snapshot';
 
 export type AIModelMode = 'Auto' | 'Fast' | 'Smart' | 'Deep';
+export type ChatRequestStatus =
+  | 'idle'
+  | 'streaming'
+  | 'completed'
+  | 'offline'
+  | 'api-failure'
+  | 'cancelled'
+  | 'retrying';
+
+export interface ChatRequestState {
+  status: ChatRequestStatus;
+  prompt?: string;
+  messageId?: string;
+  error?: string;
+  retryCount: number;
+  startedAt?: number;
+  finishedAt?: number;
+}
 
 export interface ChatAttachment {
   id: string;
@@ -19,6 +37,10 @@ export interface ChatMessage {
   isStreaming?: boolean;
   attachments?: ChatAttachment[];
   modeUsed?: AIModelMode;
+  requestStatus?: ChatRequestStatus;
+  requestPrompt?: string;
+  requestError?: string;
+  retryCount?: number;
 }
 
 export interface ChatSession {
@@ -29,8 +51,52 @@ export interface ChatSession {
   messages: ChatMessage[];
   mode: AIModelMode;
   isTemporary: boolean;
+  /** Volatile request metadata; deliberately not persisted between app launches. */
+  requestState?: ChatRequestState;
   corrupted?: boolean;
   savedCopyId?: string;
+}
+
+/** Keep existing in-memory conversations when opening another temporary chat. */
+export function appendTemporarySession(sessions: ChatSession[], session: ChatSession): ChatSession[] {
+  return [...sessions, session];
+}
+
+export function updateMessageById(
+  messages: ChatMessage[],
+  messageId: string,
+  updates: Partial<ChatMessage>,
+): ChatMessage[] {
+  return messages.map(message => message.id === messageId ? { ...message, ...updates } : message);
+}
+
+export function cancelledRequestUpdates(reason = 'cancelled'): Partial<ChatMessage> {
+  return {
+    isStreaming: false,
+    requestStatus: 'cancelled',
+    requestError: reason,
+  };
+}
+
+export function removeSavedSession(sessions: ChatSession[], savedSessionId: string): ChatSession[] {
+  return sessions.filter(session => session.id !== savedSessionId);
+}
+
+export function requestStateForStart(
+  previous: ChatRequestState | undefined,
+  prompt: string,
+  messageId: string,
+  retry = false,
+): ChatRequestState {
+  return {
+    status: retry ? 'retrying' : 'streaming',
+    prompt,
+    messageId,
+    retryCount: (previous?.retryCount ?? 0) + (retry ? 1 : 0),
+    startedAt: Date.now(),
+    error: undefined,
+    finishedAt: undefined,
+  };
 }
 
 interface ChatRepositoryState {
@@ -44,6 +110,8 @@ interface ChatRepositoryState {
   getSession: (id: string) => ChatSession | undefined;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   updateMessage: (sessionId: string, messageId: string, updates: Partial<ChatMessage>) => void;
+  beginRequest: (sessionId: string, prompt: string, messageId: string, retry?: boolean) => void;
+  updateRequestState: (sessionId: string, updates: Partial<ChatRequestState> & { status: ChatRequestStatus }) => void;
   deleteMessageAndAfter: (sessionId: string, messageId: string) => void;
   saveSession: (sessionId: string) => Promise<string>;
   updateSavedSession: (temporarySessionId: string, savedSessionId: string) => Promise<void>;
@@ -68,8 +136,9 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       messages: [],
       mode,
       isTemporary: true,
+      requestState: { status: 'idle', retryCount: 0 },
     };
-    setActiveSessions([newSession]);
+    setActiveSessions(prev => appendTemporarySession(prev, newSession));
     setCurrentSessionId(id);
     return id;
   }, []);
@@ -79,7 +148,13 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     if (!saved) throw new Error('Saved snapshot not found');
     const id = generateId();
     const copy = createSnapshot(saved, id);
-    setActiveSessions([{ ...copy, isTemporary: true, savedCopyId: savedId, corrupted: saved.corrupted }]);
+    setActiveSessions(prev => appendTemporarySession(prev, {
+      ...copy,
+      isTemporary: true,
+      requestState: { status: 'idle', retryCount: 0 },
+      savedCopyId: savedId,
+      corrupted: saved.corrupted,
+    }));
     setCurrentSessionId(id);
     return id;
   }, [savedSessions]);
@@ -118,7 +193,34 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       if (s.id !== sessionId) return s;
       return {
         ...s,
-        messages: s.messages.map(m => m.id === messageId ? { ...m, ...updates } : m)
+        messages: updateMessageById(s.messages, messageId, updates)
+      };
+    }));
+  }, []);
+
+  const beginRequest = useCallback((sessionId: string, prompt: string, messageId: string, retry = false) => {
+    setActiveSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const previous = s.requestState;
+      return { ...s, requestState: requestStateForStart(previous, prompt, messageId, retry) };
+    }));
+  }, []);
+
+  const updateRequestState = useCallback((
+    sessionId: string,
+    updates: Partial<ChatRequestState> & { status: ChatRequestStatus },
+  ) => {
+    setActiveSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const current = s.requestState ?? { status: 'idle' as const, retryCount: 0 };
+      const terminal = updates.status !== 'streaming' && updates.status !== 'retrying';
+      return {
+        ...s,
+        requestState: {
+          ...current,
+          ...updates,
+          finishedAt: terminal ? (updates.finishedAt ?? Date.now()) : updates.finishedAt,
+        },
       };
     }));
   }, []);
@@ -155,7 +257,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   }, [activeSessions, savedSessions]);
 
   const deleteSavedSession = useCallback((savedId: string) => {
-    setSavedSessions((prev) => prev.filter(s => s.id !== savedId));
+    setSavedSessions((prev) => removeSavedSession(prev, savedId));
   }, []);
 
   const corruptRandomSession = useCallback(() => {
@@ -179,6 +281,8 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       getSession,
       addMessage,
       updateMessage,
+       beginRequest,
+       updateRequestState,
       deleteMessageAndAfter,
       saveSession,
       updateSavedSession,

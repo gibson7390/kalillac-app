@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { ThemedText } from '@/components/ThemedText';
@@ -66,7 +66,14 @@ export default function PaywallScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.closeRow}>
-          <Ionicons name="close" size={28} color={colors.text} onPress={() => router.back()} />
+          <TouchableOpacity 
+            onPress={() => router.back()} 
+            style={styles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
+            <Ionicons name="close" size={24} color={colors.text} />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.header}>
@@ -84,26 +91,32 @@ export default function PaywallScreen() {
         </View>
 
         <View style={[styles.pricingCard, { backgroundColor: colors.surfaceSecondary }]}>
-          <ThemedText variant="h2">$7.99 / month</ThemedText>
-          <ThemedText variant="caption" color="secondary">Provisional price only. No real subscription is offered here.</ThemedText>
+          <ThemedText variant="h2">Internal Mock Only</ThemedText>
+          <ThemedText variant="caption" color="secondary">Pricing and entitlements are simulated for this milestone.</ThemedText>
         </View>
 
-        <View style={styles.actions}>
-          <Button 
-            title={status === 'plus' ? 'Demo Plus active' : 'Simulate subscription'} 
-            onPress={handlePurchase} 
-            size="lg" 
-            disabled={status === 'plus' || isPurchasing || isRestoring}
-            loading={isPurchasing}
-          />
-          <Button 
-            title="Restore Purchases (demo)" 
-            variant="ghost" 
-            onPress={handleRestore} 
-            disabled={isPurchasing || isRestoring}
-            loading={isRestoring}
-          />
-        </View>
+        {__DEV__ ? (
+          <View style={styles.actions}>
+            <Button
+              title={status === 'plus' ? 'Demo Plus active' : 'Simulate subscription'}
+              onPress={handlePurchase}
+              size="lg"
+              disabled={status === 'plus' || isPurchasing || isRestoring}
+              loading={isPurchasing}
+            />
+            <Button
+              title="Restore Purchases (demo)"
+              variant="ghost"
+              onPress={handleRestore}
+              disabled={isPurchasing || isRestoring}
+              loading={isRestoring}
+            />
+          </View>
+        ) : (
+          <ThemedText variant="bodySm" color="secondary" style={styles.productionNote}>
+            Plus is not available for purchase in this build.
+          </ThemedText>
+        )}
       </ScrollView>
     </View>
   );
@@ -125,7 +138,8 @@ function Feature({ icon, title, description }: { icon: any, title: string, descr
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
-  closeRow: { alignItems: 'flex-end', marginBottom: Spacing.lg },
+  closeRow: { alignItems: 'flex-end', marginBottom: Spacing.md },
+  closeBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   header: { marginBottom: Spacing.xl },
   subtitle: { marginTop: Spacing.sm, lineHeight: 22 },
   features: { gap: Spacing.lg, marginBottom: Spacing.xl },
@@ -133,4 +147,5 @@ const styles = StyleSheet.create({
   featureText: { flex: 1 },
   pricingCard: { padding: Spacing.lg, borderRadius: Radii.lg, alignItems: 'center', marginBottom: Spacing.xl },
   actions: { gap: Spacing.sm },
+  productionNote: { textAlign: 'center' },
 });

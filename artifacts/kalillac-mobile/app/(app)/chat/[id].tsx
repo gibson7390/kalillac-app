@@ -2,12 +2,17 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, StyleSheet, FlatList, TextInput, TouchableOpacity, 
   Platform, ActivityIndicator, Alert, Share,
-  Image, Linking
+  Image as RNImage, Linking, ScrollView
 } from 'react-native';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { useChatRepository, ChatMessage, AIModelMode } from '@/contexts/ChatRepositoryContext';
+import {
+  useChatRepository,
+  ChatMessage,
+  AIModelMode,
+  cancelledRequestUpdates,
+} from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
@@ -25,7 +30,10 @@ export default function ChatScreen() {
   const { colors, isDark, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
   const insets = useSafeAreaInsets();
   
-  const { getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession, updateSavedSession, endSession } = useChatRepository();
+  const {
+    getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
+    updateSavedSession, endSession, beginRequest, updateRequestState,
+  } = useChatRepository();
   const { status, consumeAllowance } = useSubscription();
   const session = getSession(id || '');
 
@@ -36,16 +44,31 @@ export default function ChatScreen() {
   const [attachments, setAttachments] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const chatServiceRef = useRef<MockChatService | null>(null);
+  const activeMessageIdRef = useRef<string | null>(null);
+  const cancelledMessageIdsRef = useRef<Set<string>>(new Set());
 
-  // If session not found, go back
+  const cancelActiveRequest = useCallback((reason = 'cancelled') => {
+    const activeMessageId = activeMessageIdRef.current;
+    const sessionId = id || '';
+    if (!activeMessageId || !sessionId) return;
+
+    cancelledMessageIdsRef.current.add(activeMessageId);
+    chatServiceRef.current?.stop();
+    updateMessage(sessionId, activeMessageId, cancelledRequestUpdates(reason));
+    updateRequestState(sessionId, {
+      status: 'cancelled',
+      messageId: activeMessageId,
+      error: reason,
+    });
+    activeMessageIdRef.current = null;
+    setIsGenerating(false);
+  }, [id, updateMessage, updateRequestState]);
+
   useEffect(() => {
     return () => {
-      // Cleanup stream on unmount
-      if (chatServiceRef.current) {
-        chatServiceRef.current.stop();
-      }
-    }
-  }, [id]);
+      cancelActiveRequest('unmounted');
+    };
+  }, [cancelActiveRequest]);
 
   if (!session) return null;
 
@@ -66,13 +89,20 @@ export default function ChatScreen() {
   }
 
   const runStream = async (sessionId: string, aiMessageId: string) => {
+    if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
+    updateMessage(sessionId, aiMessageId, { requestStatus: 'streaming', requestError: undefined });
+    updateRequestState(sessionId, { status: 'streaming', messageId: aiMessageId });
     if (offlineMode) {
-      updateMessage(sessionId, aiMessageId, { content: "Error: Simulated Offline Mode.", isStreaming: false });
+      updateMessage(sessionId, aiMessageId, { content: '', isStreaming: false, requestStatus: 'offline', requestError: 'offline' });
+      updateRequestState(sessionId, { status: 'offline', messageId: aiMessageId, error: 'offline' });
+      activeMessageIdRef.current = null;
       setIsGenerating(false);
       return;
     }
     if (apiErrorMode) {
-      updateMessage(sessionId, aiMessageId, { content: "Error: Simulated API Failure.", isStreaming: false });
+      updateMessage(sessionId, aiMessageId, { content: '', isStreaming: false, requestStatus: 'api-failure', requestError: 'api-failure' });
+      updateRequestState(sessionId, { status: 'api-failure', messageId: aiMessageId, error: 'api-failure' });
+      activeMessageIdRef.current = null;
       setIsGenerating(false);
       return;
     }
@@ -82,11 +112,28 @@ export default function ChatScreen() {
 
     try {
       await service.streamResponse((chunk, isDone) => {
-        updateMessage(sessionId, aiMessageId, { content: chunk, isStreaming: !isDone });
-        if (isDone) setIsGenerating(false);
+        if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
+        updateMessage(sessionId, aiMessageId, {
+          content: chunk,
+          isStreaming: !isDone,
+          requestStatus: isDone ? 'completed' : 'streaming',
+        });
+        if (isDone) {
+          updateRequestState(sessionId, { status: 'completed', messageId: aiMessageId });
+          activeMessageIdRef.current = null;
+          setIsGenerating(false);
+        }
       }, task);
     } catch (e) {
-      updateMessage(sessionId, aiMessageId, { content: "Stream interrupted.", isStreaming: false });
+      if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
+      updateMessage(sessionId, aiMessageId, {
+        content: '',
+        isStreaming: false,
+        requestStatus: 'api-failure',
+        requestError: 'stream-interrupted',
+      });
+      updateRequestState(sessionId, { status: 'api-failure', messageId: aiMessageId, error: 'stream-interrupted' });
+      activeMessageIdRef.current = null;
       setIsGenerating(false);
     }
   };
@@ -115,21 +162,41 @@ export default function ChatScreen() {
     // Setup AI Mock Streaming
     setIsGenerating(true);
     const aiMessageId = generateId();
-    addMessage(session.id, { id: aiMessageId, role: 'ai', content: '', isStreaming: true, modeUsed: activeMode });
+    cancelledMessageIdsRef.current.delete(aiMessageId);
+    activeMessageIdRef.current = aiMessageId;
+    addMessage(session.id, {
+      id: aiMessageId,
+      role: 'ai',
+      content: '',
+      isStreaming: true,
+      modeUsed: activeMode,
+      requestStatus: 'streaming',
+      requestPrompt: userText,
+      retryCount: 0,
+    });
+    beginRequest(session.id, userText, aiMessageId);
 
     runStream(session.id, aiMessageId);
   };
 
   const handleStop = () => {
-    if (chatServiceRef.current) {
-      chatServiceRef.current.stop();
-    }
-    setIsGenerating(false);
-    // Find the currently streaming message and mark it done
-    const streamingMsg = session.messages.find(m => m.isStreaming);
-    if (streamingMsg) {
-      updateMessage(session.id, streamingMsg.id, { isStreaming: false });
-    }
+    cancelActiveRequest();
+  };
+
+  const handleRetryMessage = (message: ChatMessage) => {
+    if (isGenerating || !message.requestPrompt) return;
+    setIsGenerating(true);
+    cancelledMessageIdsRef.current.delete(message.id);
+    activeMessageIdRef.current = message.id;
+    updateMessage(session.id, message.id, {
+      content: '',
+      isStreaming: true,
+      requestStatus: 'retrying',
+      requestError: undefined,
+      retryCount: (message.retryCount ?? 0) + 1,
+    });
+    beginRequest(session.id, message.requestPrompt, message.id, true);
+    runStream(session.id, message.id);
   };
 
   const handleRegenerate = () => {
@@ -146,7 +213,19 @@ export default function ChatScreen() {
       // Simulate generating again
       setIsGenerating(true);
       const aiMessageId = generateId();
-      addMessage(session.id, { id: aiMessageId, role: 'ai', content: '', isStreaming: true, modeUsed: activeMode });
+      cancelledMessageIdsRef.current.delete(aiMessageId);
+      activeMessageIdRef.current = aiMessageId;
+      addMessage(session.id, {
+        id: aiMessageId,
+        role: 'ai',
+        content: '',
+        isStreaming: true,
+        modeUsed: activeMode,
+        requestStatus: 'retrying',
+        requestPrompt: lastUserMsg.content,
+        retryCount: 1,
+      });
+       beginRequest(session.id, lastUserMsg.content, aiMessageId, true);
       
       runStream(session.id, aiMessageId);
     }
@@ -197,26 +276,68 @@ export default function ChatScreen() {
 
   const handleSave = async () => {
     if (saving || isGenerating) return;
+    const performSave = async () => {
+      setSaving(true);
+      try {
+        if (apiErrorMode) throw new Error('Simulated save failure');
+        if (session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
+        else await saveSession(session.id);
+        Alert.alert('Snapshot saved', 'The detached memory copy changes only when you choose Update saved copy.');
+      } catch {
+        Alert.alert('Could not save', 'The mock repository is unavailable. Turn off simulated errors and retry.');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      await performSave();
+      return;
+    }
+
     Alert.alert(session.savedCopyId ? 'Update saved copy' : 'Save this chat',
       'Save on this iPhone is a memory-only demo here. Copies disappear on reload and are not encrypted. Attachments and their metadata are excluded.',
       [{ text: 'Cancel', style: 'cancel' }, {
         text: session.savedCopyId ? 'Update saved copy' : 'Save on this iPhone',
-        onPress: async () => {
-          setSaving(true);
-          try {
-            if (apiErrorMode) throw new Error('Simulated save failure');
-            if (session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
-            else await saveSession(session.id);
-            Alert.alert('Snapshot saved', 'The detached memory copy changes only when you choose Update saved copy.');
-          } catch {
-            Alert.alert('Could not save', 'The mock repository is unavailable. Turn off simulated errors and retry.');
-          } finally { setSaving(false); }
-        }
+        onPress: performSave,
       }]);
   };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isUser = item.role === 'user';
+    const requestStatus = item.requestStatus;
+    const isFailed = requestStatus === 'offline' || requestStatus === 'api-failure' || requestStatus === 'cancelled';
+
+    if (isFailed && !isUser) {
+      return (
+        <View style={[styles.msgWrapper, styles.msgAi]}>
+          <View style={[styles.msgBubble, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error, padding: Spacing.md }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm }}>
+              <Ionicons name="warning-outline" size={20} color={colors.error} />
+              <ThemedText variant="body" weight="semiBold" style={{ marginLeft: 8, color: colors.error }}>
+                {requestStatus === 'offline' ? 'Offline' : requestStatus === 'cancelled' ? 'Response stopped' : 'Connection failed'}
+              </ThemedText>
+            </View>
+            <ThemedText variant="bodySm" color="secondary" style={{ marginBottom: Spacing.md }}>
+              {requestStatus === 'offline'
+                ? 'You appear to be offline. Check your connection and try again.'
+                : requestStatus === 'cancelled'
+                  ? 'Generation was stopped. Your prompt is preserved.'
+                  : 'The Kalillac mock server did not respond.'}
+            </ThemedText>
+            <TouchableOpacity
+              onPress={() => handleRetryMessage(item)}
+              style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, backgroundColor: colors.surfaceSecondary, borderRadius: Radii.full }}
+              accessibilityRole="button"
+              accessibilityLabel="Retry failed response"
+            >
+              <ThemedText variant="bodySm" weight="medium">Retry</ThemedText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     
     const markdownRules = {
       image: () => <ThemedText variant="caption" color="error">[Remote Image Blocked]</ThemedText>,
@@ -226,17 +347,20 @@ export default function ChatScreen() {
         const content = node.content || '';
         const lines = content.split('\n');
         return (
-          <View key={node.key} style={{ backgroundColor: colors.surfaceSecondary, borderRadius: Radii.sm, padding: Spacing.sm, marginTop: 4, marginBottom: 4 }}>
-            {lines.map((line, i) => {
-              // Extremely lightweight token coloring for visual confirmation
-              const colored = line.split(/(\b(?:const|let|var|function|return|import|from|export|default|if|else|class)\b)/).map((segment, j) => {
-                 if (['const','let','var','function','return','import','from','export','default','if','else','class'].includes(segment)) {
-                    return <ThemedText key={j} variant="bodySm" style={{ color: '#C678DD', fontFamily: 'monospace' }}>{segment}</ThemedText>;
-                 }
-                 return <ThemedText key={j} variant="bodySm" style={{ color: colors.text, fontFamily: 'monospace' }}>{segment}</ThemedText>;
-              });
-              return <View key={i} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{colored}</View>;
-            })}
+          <View key={node.key} style={{ backgroundColor: colors.surfaceSecondary, borderRadius: Radii.sm, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.sm }}>
+              <View>
+                {lines.map((line, i) => {
+                  const colored = line.split(/(\b(?:const|let|var|function|return|import|from|export|default|if|else|class)\b)/).map((segment, j) => {
+                    if (['const','let','var','function','return','import','from','export','default','if','else','class'].includes(segment)) {
+                        return <ThemedText key={j} variant="bodySm" style={{ color: '#C678DD', fontFamily: 'monospace' }}>{segment}</ThemedText>;
+                    }
+                    return <ThemedText key={j} variant="bodySm" style={{ color: colors.text, fontFamily: 'monospace' }}>{segment}</ThemedText>;
+                  });
+                  return <View key={i} style={{ flexDirection: 'row' }}>{colored}</View>;
+                })}
+              </View>
+            </ScrollView>
           </View>
         );
       }
@@ -246,7 +370,12 @@ export default function ChatScreen() {
       <View style={[styles.msgWrapper, isUser ? styles.msgUser : styles.msgAi]}>
         {!isUser && (
           <View style={[styles.aiAvatar, { backgroundColor: colors.surfaceSecondary }]}>
-            <Ionicons name="planet" size={16} color={colors.text} />
+            <RNImage
+              source={require('@/assets/brand/kalillac-mark.png')}
+              style={styles.aiMark}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
           </View>
         )}
         <View style={[
@@ -269,8 +398,12 @@ export default function ChatScreen() {
             <Markdown
               rules={markdownRules}
               style={{
-                body: { color: isUser ? colors.textBubbleUser : colors.textBubbleAi, fontSize: 16, fontFamily: 'Inter_400Regular' },
-                code_block: { backgroundColor: colors.surfaceSecondary, color: colors.text, borderRadius: Radii.sm, padding: Spacing.sm, fontFamily: 'monospace' },
+                body: { color: isUser ? colors.textBubbleUser : colors.textBubbleAi, fontSize: 16, fontFamily: 'Inter_400Regular', lineHeight: 24 },
+                paragraph: { marginBottom: 12 },
+                strong: { fontFamily: 'Inter_600SemiBold' },
+                em: { fontStyle: 'italic' },
+                code_inline: { backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : colors.surfaceSecondary, color: isUser ? colors.textBubbleUser : colors.text, borderRadius: 4, paddingHorizontal: 4, fontFamily: 'monospace' },
+                blockquote: { borderLeftWidth: 4, borderLeftColor: colors.border, paddingLeft: 12, opacity: 0.8 },
               }}
               onLinkPress={(url) => {
                   if (/^https:\/\//i.test(url)) {
@@ -294,6 +427,7 @@ export default function ChatScreen() {
             <TouchableOpacity 
               onPress={() => handleCopy(item.content)} 
               style={styles.actionBtn}
+              accessibilityRole="button"
               accessibilityLabel="Copy message"
             >
               <Ionicons name="copy-outline" size={16} color={colors.textTertiary} />
@@ -301,6 +435,7 @@ export default function ChatScreen() {
             <TouchableOpacity 
               onPress={() => handleShare(item.content)} 
               style={styles.actionBtn}
+              accessibilityRole="button"
               accessibilityLabel="Share message"
             >
               <Ionicons name="share-outline" size={16} color={colors.textTertiary} />
@@ -308,6 +443,7 @@ export default function ChatScreen() {
             <TouchableOpacity 
               onPress={handleRegenerate} 
               style={styles.actionBtn}
+              accessibilityRole="button"
               accessibilityLabel="Regenerate response"
             >
               <Ionicons name="refresh-outline" size={16} color={colors.textTertiary} />
@@ -320,6 +456,7 @@ export default function ChatScreen() {
             <TouchableOpacity 
               onPress={() => handleEdit(item.id, item.content)} 
               style={styles.actionBtn}
+              accessibilityRole="button"
               accessibilityLabel="Edit message"
             >
               <Ionicons name="pencil-outline" size={16} color={colors.textTertiary} />
@@ -357,7 +494,7 @@ export default function ChatScreen() {
                 {saving ? <ActivityIndicator /> : <Ionicons name={session.savedCopyId ? "save-outline" : "bookmark-outline"} size={24} color={colors.text} />}
               </TouchableOpacity>
               {session.isTemporary && (
-                <TouchableOpacity onPress={handleEndChat} accessibilityRole="button" accessibilityLabel="End chat">
+                <TouchableOpacity onPress={handleEndChat} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="End chat">
                   <Ionicons name="trash-outline" size={24} color={colors.error} />
                 </TouchableOpacity>
               )}
@@ -367,7 +504,7 @@ export default function ChatScreen() {
       />
 
       <ThemedText variant="caption" color="secondary" style={{ paddingHorizontal: Spacing.md, paddingVertical: 8 }}>
-        Temporary · Demo responses · {session.savedCopyId ? 'Saved copy updates only by choice' : 'Memory only'}
+        Temporary chat · {session.savedCopyId ? 'Saved copy updates only by choice' : 'Memory only'}
       </ThemedText>
       <FlatList
         data={[...session.messages].reverse()}
@@ -377,29 +514,32 @@ export default function ChatScreen() {
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
-        ListEmptyComponent={<ThemedText variant="body" color="secondary" style={{ transform: [{ scaleY: -1 }], padding: Spacing.lg }}>Start a {task || 'new'} conversation. This preview uses sample responses, not real AI.</ThemedText>}
+        ListEmptyComponent={<ThemedText variant="body" color="secondary" style={{ transform: [{ scaleY: -1 }], padding: Spacing.lg }}>Start a {task?.toLowerCase() || 'new'} conversation.</ThemedText>}
       />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <View style={[styles.inputContainer, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom || Spacing.md }]}>
           
-          {/* Mode Selector Mock */}
-          <View style={styles.modeSelectorRow}>
+          {/* Mode Selector */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeSelectorRow}>
             {['Auto', 'Fast', 'Smart', 'Deep'].map((mode) => (
               <TouchableOpacity 
                 key={mode} 
                 onPress={() => setActiveMode(mode as AIModelMode)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activeMode === mode }}
+                accessibilityLabel={`${mode} mode`}
                 style={[
                   styles.modeBtn, 
                   activeMode === mode ? { backgroundColor: colors.text } : { backgroundColor: colors.surfaceSecondary }
                 ]}
               >
-                <ThemedText variant="caption" style={{ color: activeMode === mode ? colors.background : colors.textSecondary }}>
+                <ThemedText variant="bodySm" weight="medium" style={{ color: activeMode === mode ? colors.background : colors.textSecondary }}>
                   {mode}
                 </ThemedText>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
 
           <View style={[styles.inputBox, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
             {attachments.length > 0 && (
@@ -419,13 +559,15 @@ export default function ChatScreen() {
             )}
             
             <View style={styles.inputRow}>
-              <TouchableOpacity 
-                style={styles.attachBtn} 
-                onPress={handleAttachMock}
-                accessibilityLabel="Attach file"
-              >
-                <Ionicons name="add-circle-outline" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
+              {__DEV__ && (
+                <TouchableOpacity 
+                  style={styles.attachBtn} 
+                  onPress={handleAttachMock}
+                  accessibilityLabel="Attach file"
+                >
+                  <Ionicons name="add-circle-outline" size={24} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
               
               <TextInput
                 style={[styles.input, { color: colors.text }]}
@@ -470,12 +612,13 @@ const styles = StyleSheet.create({
   msgUser: { alignSelf: 'flex-end' },
   msgAi: { alignSelf: 'flex-start', flexDirection: 'column' },
   aiAvatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  aiMark: { width: 18, height: 18 },
   msgBubble: { padding: Spacing.md, borderRadius: Radii.lg },
   msgActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: 4, marginLeft: 4 },
   actionBtn: { padding: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   inputContainer: { padding: Spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
   modeSelectorRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm },
-  modeBtn: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radii.full },
+  modeBtn: { paddingHorizontal: Spacing.md, minHeight: 44, justifyContent: 'center', borderRadius: Radii.full },
   inputBox: { borderRadius: Radii.xl, borderWidth: 1, padding: Spacing.xs },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
   attachmentsPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, padding: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.1)' },
