@@ -1,0 +1,169 @@
+ARCHITECTURE REVIEW — APPROVED WITH THE FOLLOWING REQUIRED REVISIONS
+
+The overall Milestone 0 architecture is approved. Preserve it.
+
+Before implementation, incorporate the following changes. These are scope clarifications, not permission to redesign the product.
+
+1. GitHub must be established before code generation
+
+Before creating or modifying application files, connect this project exclusively to:
+
+gibson7390/kalillac-app
+
+This private repository is the permanent source of truth.
+
+Do not connect to, read from, import, modify, or push to:
+
+gibson7390/kalillac
+
+Confirm the exact connected repository before implementation starts.
+
+2. Milestone 1 remains UI/application-shell only
+
+Do not implement:
+
+* FastAPI backend
+* Groq
+* OpenAI
+* Brave/Tavily
+* RevenueCat
+* StoreKit purchases
+* Supabase/Postgres
+* production authentication
+* production usage metering
+* production encrypted native vault
+* backend deployment
+
+during Milestone 1.
+
+Milestone 1 exists to prove that Kalillac can look and feel like a premium commercial iPhone application.
+
+Use explicit interfaces/adapters and mocks so the production implementations can replace them later without redesigning the UI.
+
+3. Do not implement the CryptoKit/Keychain vault during the initial UI build
+
+Preserve the proposed native CryptoKit/Keychain architecture for the real saved-chat implementation.
+
+However, during Milestone 1, implement the complete Save UX against a mock/in-memory saved-chat repository only.
+
+The UI must demonstrate:
+
+* Save this chat
+* Save on this iPhone
+* saved confirmation
+* Saved Chats list
+* open saved chat
+* Update saved copy
+* delete saved chat
+* corruption/failure presentation
+
+But do not claim that the Milestone 1 mock is actually encrypted storage.
+
+After the visual shell passes review on a physical iPhone, the real local encrypted vault will be implemented and tested using a development build.
+
+4. Saved conversations do not automatically retain attachments
+
+For v1, an explicit Save captures the conversation text and its normal presentation data only.
+
+Do not automatically persist:
+
+* original uploaded files
+* images
+* filenames
+* extracted document contents
+* attachment descriptions
+* attachment metadata
+
+Attachment persistence may be designed later as a separate explicit user choice.
+
+5. Preserve explicit snapshot semantics
+
+A Save action creates a snapshot.
+
+Continuing the conversation afterward must NOT silently update the saved copy.
+
+The user must explicitly choose Update saved copy.
+
+This is intentional and approved.
+
+6. Temporary conversation state remains strictly memory-only
+
+Do not persist Milestone 1 temporary conversation data through:
+
+* AsyncStorage
+* SQLite
+* SecureStore
+* filesystem storage
+* navigation-state restoration
+* query caching
+* diagnostics
+* logs
+
+AsyncStorage may be used only for non-content preferences such as theme, onboarding completion, haptic preference, and accessibility-related choices.
+
+7. The proposed backend expiry policy is provisionally approved
+
+Preserve for Milestone 2 planning:
+
+* approximately 60-minute idle expiration
+* 24-hour absolute backstop
+* immediate best-effort purge on End Chat / New Chat
+
+Do not implement that backend during Milestone 1.
+
+8. Do not scaffold unnecessary production systems merely to make the repository look complete
+
+During Milestone 1, concentrate implementation in the mobile application.
+
+The repository may contain architecture documentation/contracts needed to protect future interfaces, but do not build a fake backend, fake database, or unused service implementation.
+
+9. Preserve remote-content protection
+
+Your recommendation not to automatically load remote images embedded in model-generated Markdown is approved and should remain part of the design.
+
+10. Visual quality remains the primary Milestone 1 acceptance gate
+
+Do not optimize for number of screens at the expense of design quality.
+
+The shell must have:
+
+* coherent Kalillac design language
+* premium typography
+* excellent spacing
+* polished light and dark themes
+* restrained use of cards
+* native-feeling sheets and controls
+* fluid mock streaming
+* high-quality Markdown/code/table presentation
+* subtle haptics
+* subtle motion
+* excellent keyboard behavior
+* polished empty/error/offline/loading states
+* accessibility
+
+Do not invent final Kalillac brand artwork or final brand colors if those assets have not been supplied. Establish semantic design tokens so final branding can be inserted cleanly.
+
+11. Do not expose mock behavior as real capability
+
+Research, provider information, purchases, allowances and model responses may be simulated in Milestone 1, but the UI must clearly operate through mock services internally.
+
+Do not label mock security, encryption, purchases, subscriptions, provider retention or AI processing as production-complete.
+
+12. Milestone 1 output
+
+Once implementation begins, the goal is a real React Native + Expo + TypeScript application shell that we can run and evaluate on an iPhone.
+
+Stop after Milestone 1. Do not automatically continue into backend/API/subscription work.
+
+At completion provide:
+
+* exact files created/changed
+* dependency list
+* architecture summary
+* instructions for running it on the iPhone
+* screenshots or preview access where available
+* known limitations
+* confirmation that no paid APIs or production services were connected
+* confirmation that temporary chat content has no persistence path
+
+After incorporating these revisions into the task plan, return the revised Milestone 1 plan for final approval. Do not start implementation yet.
