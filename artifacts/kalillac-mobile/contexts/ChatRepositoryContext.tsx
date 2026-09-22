@@ -55,8 +55,8 @@ export interface ChatSession {
   requestState?: ChatRequestState;
   corrupted?: boolean;
   savedCopyId?: string;
-  /** The active conversation ID that owns a memory-only saved snapshot. */
-  sourceSessionId?: string;
+  /** Stable logical conversation ID shared by saved backings and resumed copies. */
+  sourceConversationId?: string;
 }
 
 /** Keep existing in-memory conversations when opening another temporary chat. */
@@ -91,19 +91,21 @@ export function cancelledRequestUpdates(reason = 'cancelled'): Partial<ChatMessa
   };
 }
 
-export function removeSavedSession(sessions: ChatSession[], savedSessionId: string): ChatSession[] {
-  return sessions.filter(session => session.id !== savedSessionId);
-}
-
 export function resolveLogicalConversationId(
   activeSessions: ChatSession[],
   savedSessions: ChatSession[],
-  savedSessionId: string,
-): string | undefined {
-  const savedSession = savedSessions.find(session => session.id === savedSessionId);
-  if (!savedSession) return undefined;
-  return savedSession.sourceSessionId
-    ?? activeSessions.find(session => session.savedCopyId === savedSessionId)?.id
+  id: string,
+): string {
+  const activeSession = activeSessions.find(session => session.id === id);
+  if (activeSession) return activeSession.sourceConversationId ?? activeSession.id;
+
+  const savedSession = savedSessions.find(session => session.id === id);
+  if (!savedSession) return id;
+
+  const linkedActive = activeSessions.find(session => session.savedCopyId === savedSession.id);
+  return savedSession.sourceConversationId
+    ?? linkedActive?.sourceConversationId
+    ?? linkedActive?.id
     ?? savedSession.id;
 }
 
@@ -114,13 +116,15 @@ export function deleteLogicalConversationState(
 ): { activeSessions: ChatSession[]; savedSessions: ChatSession[] } {
   const linkedSavedIds = new Set(
     savedSessions
-      .filter(saved => saved.id === logicalConversationId || saved.sourceSessionId === logicalConversationId)
+      .filter(saved => saved.id === logicalConversationId
+        || (saved.sourceConversationId ?? saved.id) === logicalConversationId)
       .map(saved => saved.id),
   );
   const activeIdsToDelete = new Set(
     activeSessions
       .filter(session => (
         session.id === logicalConversationId
+        || session.sourceConversationId === logicalConversationId
         || (session.savedCopyId && linkedSavedIds.has(session.savedCopyId))
       ))
       .map(session => session.id),
@@ -148,11 +152,16 @@ export function saveSnapshotState(
   temporarySessionId: string,
   snapshot: ChatSession,
 ): { activeSessions: ChatSession[]; savedSessions: ChatSession[] } {
+  const linkedSnapshot = {
+    ...snapshot,
+    sourceConversationId: snapshot.sourceConversationId ?? temporarySessionId,
+  };
+
   return {
     activeSessions: activeSessions.map(session => session.id === temporarySessionId
-      ? { ...session, savedCopyId: snapshot.id }
+      ? { ...session, savedCopyId: linkedSnapshot.id }
       : session),
-    savedSessions: [snapshot, ...savedSessions],
+    savedSessions: [linkedSnapshot, ...savedSessions],
   };
 }
 
@@ -249,7 +258,8 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteLogicalConversation = useCallback((logicalConversationId: string) => {
-    const next = deleteLogicalConversationState(activeSessions, savedSessions, logicalConversationId);
+    const logicalId = resolveLogicalConversationId(activeSessions, savedSessions, logicalConversationId);
+    const next = deleteLogicalConversationState(activeSessions, savedSessions, logicalId);
     const deletedActiveIds = new Set(
       activeSessions
         .filter(session => !next.activeSessions.some(remaining => remaining.id === session.id))
@@ -354,7 +364,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     if (!session) throw new Error('Session not found');
     const snapshot = {
       ...createSnapshot(session, generateId()),
-      sourceSessionId: session.id,
+      sourceConversationId: session.sourceConversationId ?? session.id,
     };
     const next = saveSnapshotState(activeSessions, savedSessions, sessionId, snapshot);
     setActiveSessions(next.activeSessions);
@@ -365,10 +375,12 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   const updateSavedSession = useCallback(async (tempId: string, savedId: string) => {
     const tempSession = activeSessions.find(s => s.id === tempId);
     if (!tempSession || !savedSessions.some(s => s.id === savedId)) throw new Error('Snapshot unavailable');
-    const snapshot = {
-      ...createSnapshot(tempSession, savedId),
-      sourceSessionId: tempSession.id,
-    };
+    const savedSession = savedSessions.find(s => s.id === savedId)!;
+    const snapshot = createSnapshot(
+      tempSession,
+      savedId,
+      savedSession.sourceConversationId ?? tempSession.sourceConversationId ?? tempSession.id,
+    );
     setSavedSessions(prev => prev.map(s => s.id === savedId ? snapshot : s));
   }, [activeSessions, savedSessions]);
 

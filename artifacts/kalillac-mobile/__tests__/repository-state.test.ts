@@ -5,7 +5,6 @@ import {
   deleteLogicalConversationState,
   hasSavedSnapshotAssociation,
   meaningfulActiveSessions,
-  removeSavedSession,
   requestStateForStart,
   resolveLogicalConversationId,
   saveSnapshotState,
@@ -85,11 +84,14 @@ describe('temporary chat repository state', () => {
   });
 
   it('resolves a saved row to its logical conversation ID', () => {
-    const first = { ...session('saved-first'), isTemporary: false };
+    const first = {
+      ...session('saved-first'),
+      isTemporary: false,
+      sourceConversationId: 'conversation',
+    };
     const second = { ...session('saved-second'), isTemporary: false };
     const active = { ...session('conversation'), savedCopyId: first.id };
 
-    expect(removeSavedSession([first, second], first.id).map(item => item.id)).toEqual(['saved-second']);
     expect(resolveLogicalConversationId([active], [first, second], first.id)).toBe('conversation');
   });
 
@@ -107,7 +109,7 @@ describe('temporary chat repository state', () => {
   it('deletes a saved logical conversation from both Active Chats and Saved', () => {
     const linked = { ...session('continued-copy'), savedCopyId: 'saved' };
     const unrelated = { ...session('unrelated'), savedCopyId: 'other-saved' };
-    const saved = { ...session('saved'), isTemporary: false, sourceSessionId: 'original-conversation' };
+    const saved = { ...session('saved'), isTemporary: false, sourceConversationId: 'original-conversation' };
     const otherSaved = { ...session('other-saved'), isTemporary: false };
 
     const logicalId = resolveLogicalConversationId([linked, unrelated], [saved, otherSaved], saved.id);
@@ -120,7 +122,7 @@ describe('temporary chat repository state', () => {
 
   it('creates one saved snapshot and links it to the temporary conversation', () => {
     const temporary = session('temporary');
-    const snapshot = { ...session('saved'), isTemporary: false, sourceSessionId: temporary.id };
+    const snapshot = { ...session('saved'), isTemporary: false, sourceConversationId: temporary.id };
 
     const next = saveSnapshotState([temporary], [], temporary.id, snapshot);
 
@@ -199,7 +201,7 @@ describe('temporary chat repository state', () => {
       ...conversation,
       id: 'saved-first',
       isTemporary: false,
-      sourceSessionId: conversation.id,
+       sourceConversationId: conversation.id,
     };
 
     const firstSave = saveSnapshotState([conversation], [], conversation.id, firstSnapshot);
@@ -218,7 +220,7 @@ describe('temporary chat repository state', () => {
       ...conversation,
       id: 'saved-second',
       isTemporary: false,
-      sourceSessionId: conversation.id,
+       sourceConversationId: conversation.id,
     };
     const secondSave = saveSnapshotState(
       [conversation],

@@ -1,6 +1,10 @@
 import type { ChatSession } from '../contexts/ChatRepositoryContext';
 
-export function createSnapshot(session: ChatSession, newId: string): ChatSession {
+export function createSnapshot(
+  session: ChatSession,
+  newId: string,
+  sourceConversationId = session.sourceConversationId ?? session.id,
+): ChatSession {
   return {
     id: newId,
     title: session.title,
@@ -8,6 +12,7 @@ export function createSnapshot(session: ChatSession, newId: string): ChatSession
     updatedAt: Date.now(),
     mode: session.mode,
     isTemporary: false,
+    sourceConversationId,
     messages: session.messages.map(m => ({
       id: m.id,
       role: m.role,
