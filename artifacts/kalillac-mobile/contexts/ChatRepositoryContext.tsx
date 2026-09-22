@@ -70,6 +70,17 @@ export function updateMessageById(
   return messages.map(message => message.id === messageId ? { ...message, ...updates } : message);
 }
 
+export function updateSessionMessageById(
+  sessions: ChatSession[],
+  sessionId: string,
+  messageId: string,
+  updates: Partial<ChatMessage>,
+): ChatSession[] {
+  return sessions.map(session => session.id === sessionId
+    ? { ...session, messages: updateMessageById(session.messages, messageId, updates) }
+    : session);
+}
+
 export function cancelledRequestUpdates(reason = 'cancelled'): Partial<ChatMessage> {
   return {
     isStreaming: false,
@@ -80,6 +91,65 @@ export function cancelledRequestUpdates(reason = 'cancelled'): Partial<ChatMessa
 
 export function removeSavedSession(sessions: ChatSession[], savedSessionId: string): ChatSession[] {
   return sessions.filter(session => session.id !== savedSessionId);
+}
+
+export function clearSavedSessionAssociation(
+  sessions: ChatSession[],
+  savedSessionId: string,
+): ChatSession[] {
+  return sessions.map(session => {
+    if (session.savedCopyId !== savedSessionId) return session;
+    const unsavedSession = { ...session };
+    delete unsavedSession.savedCopyId;
+    return unsavedSession;
+  });
+}
+
+export function deleteSavedSnapshotState(
+  activeSessions: ChatSession[],
+  savedSessions: ChatSession[],
+  savedSessionId: string,
+): { activeSessions: ChatSession[]; savedSessions: ChatSession[] } {
+  return {
+    activeSessions: clearSavedSessionAssociation(activeSessions, savedSessionId),
+    savedSessions: removeSavedSession(savedSessions, savedSessionId),
+  };
+}
+
+export function deleteTemporaryConversationState(
+  activeSessions: ChatSession[],
+  savedSessions: ChatSession[],
+  sessionId: string,
+): { activeSessions: ChatSession[]; savedSessions: ChatSession[] } {
+  const session = activeSessions.find(item => item.id === sessionId);
+  return {
+    activeSessions: activeSessions.filter(item => item.id !== sessionId),
+    savedSessions: session?.savedCopyId
+      ? removeSavedSession(savedSessions, session.savedCopyId)
+      : savedSessions,
+  };
+}
+
+export function meaningfulActiveSessions(sessions: ChatSession[]): ChatSession[] {
+  return sessions.filter(session => session.messages.length > 0);
+}
+
+export function saveSnapshotState(
+  activeSessions: ChatSession[],
+  savedSessions: ChatSession[],
+  temporarySessionId: string,
+  snapshot: ChatSession,
+): { activeSessions: ChatSession[]; savedSessions: ChatSession[] } {
+  return {
+    activeSessions: activeSessions.map(session => session.id === temporarySessionId
+      ? { ...session, savedCopyId: snapshot.id }
+      : session),
+    savedSessions: [snapshot, ...savedSessions],
+  };
+}
+
+export function hasSavedSnapshotAssociation(session: ChatSession): boolean {
+  return !!session.savedCopyId;
 }
 
 export function requestStateForStart(
@@ -105,7 +175,7 @@ interface ChatRepositoryState {
   currentSessionId: string | null;
   createSession: (mode?: AIModelMode) => string;
   continueSavedSession: (savedId: string) => string;
-  endSession: (id: string) => void;
+  deleteConversation: (id: string) => void;
   clearAllTemporary: () => void;
   getSession: (id: string) => ChatSession | undefined;
   addMessage: (sessionId: string, message: ChatMessage) => void;
@@ -159,10 +229,12 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     return id;
   }, [savedSessions]);
 
-  const endSession = useCallback((id: string) => {
-    setActiveSessions((prev) => prev.filter((s) => s.id !== id));
+  const deleteConversation = useCallback((id: string) => {
+    const next = deleteTemporaryConversationState(activeSessions, savedSessions, id);
+    setActiveSessions(next.activeSessions);
+    setSavedSessions(next.savedSessions);
     if (currentSessionId === id) setCurrentSessionId(null);
-  }, [currentSessionId]);
+  }, [activeSessions, currentSessionId, savedSessions]);
 
   const clearAllTemporary = useCallback(() => {
     setActiveSessions([]);
@@ -189,13 +261,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateMessage = useCallback((sessionId: string, messageId: string, updates: Partial<ChatMessage>) => {
-    setActiveSessions((prev) => prev.map(s => {
-      if (s.id !== sessionId) return s;
-      return {
-        ...s,
-        messages: updateMessageById(s.messages, messageId, updates)
-      };
-    }));
+    setActiveSessions((prev) => updateSessionMessageById(prev, sessionId, messageId, updates));
   }, []);
 
   const beginRequest = useCallback((sessionId: string, prompt: string, messageId: string, retry = false) => {
@@ -244,10 +310,11 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     const session = activeSessions.find(s => s.id === sessionId);
     if (!session) throw new Error('Session not found');
     const snapshot = createSnapshot(session, generateId());
-    setSavedSessions((prev) => [snapshot, ...prev]);
-    setActiveSessions(prev => prev.map(s => s.id === sessionId ? { ...s, savedCopyId: snapshot.id } : s));
+    const next = saveSnapshotState(activeSessions, savedSessions, sessionId, snapshot);
+    setActiveSessions(next.activeSessions);
+    setSavedSessions(next.savedSessions);
     return snapshot.id;
-  }, [activeSessions]);
+  }, [activeSessions, savedSessions]);
 
   const updateSavedSession = useCallback(async (tempId: string, savedId: string) => {
     const tempSession = activeSessions.find(s => s.id === tempId);
@@ -257,8 +324,10 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   }, [activeSessions, savedSessions]);
 
   const deleteSavedSession = useCallback((savedId: string) => {
-    setSavedSessions((prev) => removeSavedSession(prev, savedId));
-  }, []);
+    const next = deleteSavedSnapshotState(activeSessions, savedSessions, savedId);
+    setActiveSessions(next.activeSessions);
+    setSavedSessions(next.savedSessions);
+  }, [activeSessions, savedSessions]);
 
   const corruptRandomSession = useCallback(() => {
     setSavedSessions((prev) => {
@@ -276,7 +345,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       currentSessionId,
       createSession,
       continueSavedSession,
-      endSession,
+      deleteConversation,
       clearAllTemporary,
       getSession,
       addMessage,

@@ -6,13 +6,14 @@ import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
 import { router } from 'expo-router';
-import { useChatRepository, AIModelMode } from '@/contexts/ChatRepositoryContext';
+import { useChatRepository, AIModelMode, meaningfulActiveSessions } from '@/contexts/ChatRepositoryContext';
 import { BrandLockup } from '@/components/BrandLockup';
 
 export default function HomeTab() {
   const { colors } = usePreferences();
   const insets = useSafeAreaInsets();
   const { createSession, activeSessions } = useChatRepository();
+  const resumableSessions = meaningfulActiveSessions(activeSessions);
 
   const handleNewChat = (mode: AIModelMode = 'Auto', task?: string) => {
     const id = createSession(mode);
@@ -43,13 +44,13 @@ export default function HomeTab() {
           </View>
         </TouchableOpacity>
 
-        {activeSessions.length > 0 && (
+        {resumableSessions.length > 0 && (
           <View style={styles.activeSection}>
             <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>
               ACTIVE CHATS
             </ThemedText>
             <View style={styles.activeList}>
-              {activeSessions.map((activeSession) => (
+              {resumableSessions.map((activeSession) => (
                 <TouchableOpacity
                   key={activeSession.id}
                   style={[styles.activeRow, { borderBottomColor: colors.border }]}

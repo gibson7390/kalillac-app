@@ -12,6 +12,7 @@ import {
   ChatMessage,
   AIModelMode,
   cancelledRequestUpdates,
+  hasSavedSnapshotAssociation,
 } from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -32,10 +33,11 @@ export default function ChatScreen() {
   
   const {
     getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
-    updateSavedSession, endSession, beginRequest, updateRequestState,
+    updateSavedSession, deleteConversation, beginRequest, updateRequestState,
   } = useChatRepository();
   const { status, consumeAllowance } = useSubscription();
   const session = getSession(id || '');
+  const hasSavedCopy = session ? hasSavedSnapshotAssociation(session) : false;
 
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -280,7 +282,7 @@ export default function ChatScreen() {
       setSaving(true);
       try {
         if (apiErrorMode) throw new Error('Simulated save failure');
-        if (session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
+        if (hasSavedCopy && session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
         else await saveSession(session.id);
         Alert.alert('Snapshot saved', 'The detached memory copy changes only when you choose Update saved copy.');
       } catch {
@@ -295,10 +297,10 @@ export default function ChatScreen() {
       return;
     }
 
-    Alert.alert(session.savedCopyId ? 'Update saved copy' : 'Save this chat',
+    Alert.alert(hasSavedCopy ? 'Update saved copy' : 'Save this chat',
       'Save on this iPhone is a memory-only demo here. Copies disappear on reload and are not encrypted. Attachments and their metadata are excluded.',
       [{ text: 'Cancel', style: 'cancel' }, {
-        text: session.savedCopyId ? 'Update saved copy' : 'Save on this iPhone',
+        text: hasSavedCopy ? 'Update saved copy' : 'Save on this iPhone',
         onPress: performSave,
       }]);
   };
@@ -468,14 +470,17 @@ export default function ChatScreen() {
   };
 
   const handleEndChat = () => {
-    Alert.alert('End Chat', 'This will delete the current temporary conversation from memory.', [
+    const message = hasSavedCopy
+      ? 'This deletes the temporary conversation and its saved copy. This cannot be undone.'
+      : 'This deletes the temporary conversation from this in-memory session. This cannot be undone.';
+    Alert.alert('Delete Conversation?', message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'End Chat', style: 'destructive', onPress: () => {
-        handleStop(); // Cancel stream
-         setInput('');
-         setAttachments([]);
-        endSession(session.id);
-         router.replace('/(app)/(tabs)');
+      { text: 'Delete Conversation', style: 'destructive', onPress: () => {
+        cancelActiveRequest('conversation-deleted');
+        setInput('');
+        setAttachments([]);
+        deleteConversation(session.id);
+        router.replace('/(app)/(tabs)');
       }}
     ]);
   };
@@ -490,11 +495,11 @@ export default function ChatScreen() {
           headerTintColor: colors.text,
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: Spacing.md, alignItems: 'center' }}>
-              <TouchableOpacity onPress={handleSave} disabled={saving || isGenerating || session.messages.length === 0} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel={session.savedCopyId ? 'Update saved copy' : 'Save this chat'}>
-                {saving ? <ActivityIndicator /> : <Ionicons name={session.savedCopyId ? "save-outline" : "bookmark-outline"} size={24} color={colors.text} />}
+              <TouchableOpacity onPress={handleSave} disabled={saving || isGenerating || session.messages.length === 0} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel={hasSavedCopy ? 'Update saved copy' : 'Save this chat'}>
+                {saving ? <ActivityIndicator /> : <Ionicons name={hasSavedCopy ? "save-outline" : "bookmark-outline"} size={24} color={colors.text} />}
               </TouchableOpacity>
               {session.isTemporary && (
-                <TouchableOpacity onPress={handleEndChat} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="End chat">
+                <TouchableOpacity onPress={handleEndChat} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Delete conversation">
                   <Ionicons name="trash-outline" size={24} color={colors.error} />
                 </TouchableOpacity>
               )}
@@ -504,7 +509,7 @@ export default function ChatScreen() {
       />
 
       <ThemedText variant="caption" color="secondary" style={{ paddingHorizontal: Spacing.md, paddingVertical: 8 }}>
-        Temporary chat · {session.savedCopyId ? 'Saved copy updates only by choice' : 'Memory only'}
+        Temporary chat · {hasSavedCopy ? 'Saved copy updates only by choice' : 'Memory only'}
       </ThemedText>
       <FlatList
         data={[...session.messages].reverse()}

@@ -28,15 +28,15 @@ export default function SavedTab() {
 
   const handleDelete = (id: string) => {
     if (Platform.OS === 'web') {
-      if (globalThis.confirm('Delete this saved snapshot? This cannot be undone.')) {
+      if (globalThis.confirm('Remove this saved copy? Any active temporary conversation will remain available and return to an unsaved state.')) {
         deleteSavedSession(id);
       }
       return;
     }
 
-    Alert.alert('Delete Saved Chat', 'Are you sure? This cannot be undone.', [
+    Alert.alert('Remove saved copy?', 'This removes only the saved snapshot. Any active temporary conversation will remain available and return to an unsaved state.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteSavedSession(id) }
+      { text: 'Remove Saved Copy', style: 'destructive', onPress: () => deleteSavedSession(id) }
     ]);
   };
 
@@ -65,7 +65,7 @@ export default function SavedTab() {
         style={styles.deleteBtn}
         onPress={() => handleDelete(item.id)}
         accessibilityRole="button"
-        accessibilityLabel="Delete snapshot"
+        accessibilityLabel="Remove saved copy"
       >
         <Ionicons name="trash-outline" size={20} color={colors.error} />
       </TouchableOpacity>
