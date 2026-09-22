@@ -1,0 +1,79 @@
+MILESTONE 1B — PREMIUM VISUAL & PRODUCT AUDIT ONLY
+
+Do not modify application code in this task.
+
+Kalillac Milestone 1, portability hardening, iOS Markdown compatibility, and Markdown security regression testing are complete. We are now evaluating whether the existing mobile shell visually and behaviorally meets the quality bar for a serious commercial AI application.
+
+Audit the current Kalillac mobile shell as it exists now.
+
+Review these screens and flows at realistic iPhone dimensions:
+
+* onboarding
+* Home
+* new temporary conversation
+* Research
+* Study
+* Analyze
+* Code
+* Create
+* Search
+* chat/composer
+* Auto / Fast / Smart / Deep controls
+* streaming response presentation
+* Saved
+* Settings
+* Privacy
+* AI Providers
+* Kalillac Plus/paywall
+* offline/error states
+* light mode
+* dark mode
+
+Evaluate:
+
+1. visual hierarchy
+2. typography
+3. spacing and density
+4. card usage
+5. navigation clarity
+6. composer quality
+7. message presentation
+8. mode selector design
+9. premium/native iOS feel
+10. brand distinctiveness
+11. consistency across screens
+12. accessibility and tap-target sizing
+13. whether any screen looks generic, scaffolded, template-like, crowded, cheap, unfinished, or visually inconsistent
+14. whether the privacy-first identity is communicated clearly without overwhelming the user
+15. whether the app feels competitive with polished mainstream AI applications
+
+Specifically inspect the current six Home task cards. Determine whether they create excessive card density or a generic AI-template appearance.
+
+Also inspect development/demo controls. Identify anything that must be hidden, gated, or removed before a production release.
+
+Do not:
+
+* redesign anything yet
+* change colors or typography
+* change navigation
+* add features
+* modify privacy behavior
+* begin backend work
+* implement encrypted storage
+* add AI providers
+* add subscriptions
+* address unrelated React Native Web deprecation warnings
+
+Produce a prioritized audit with:
+
+A. Release-blocking visual/product issues
+
+B. High-value refinements
+
+C. Things that are already strong and should be preserved
+
+D. Development/demo elements that must not ship
+
+E. Proposed consolidated refinement scope for one implementation pass
+
+Be specific about screen names and components. Do not make changes. Stop after the audit.
