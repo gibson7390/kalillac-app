@@ -33,7 +33,8 @@ export default function ChatScreen() {
   
   const {
     getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
-    updateSavedSession, deleteConversation, beginRequest, updateRequestState,
+    updateSavedSession, deleteLogicalConversation, registerRequestCancellation,
+    beginRequest, updateRequestState,
   } = useChatRepository();
   const { status, consumeAllowance } = useSubscription();
   const session = getSession(id || '');
@@ -71,6 +72,11 @@ export default function ChatScreen() {
       cancelActiveRequest('unmounted');
     };
   }, [cancelActiveRequest]);
+
+  useEffect(() => {
+    if (!session) return;
+    return registerRequestCancellation(session.id, () => cancelActiveRequest('conversation-deleted'));
+  }, [session?.id, registerRequestCancellation, cancelActiveRequest]);
 
   if (!session) return null;
 
@@ -471,17 +477,23 @@ export default function ChatScreen() {
 
   const handleEndChat = () => {
     const message = hasSavedCopy
-      ? 'This deletes the temporary conversation and its saved copy. This cannot be undone.'
-      : 'This deletes the temporary conversation from this in-memory session. This cannot be undone.';
-    Alert.alert('Delete Conversation?', message, [
+      ? 'Delete this conversation? Its saved copy will also be deleted. This cannot be undone.'
+      : 'Delete this conversation? This cannot be undone.';
+    const confirmDelete = () => {
+      setInput('');
+      setAttachments([]);
+      deleteLogicalConversation(session.id);
+      router.replace('/(app)/(tabs)');
+    };
+
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm(message)) confirmDelete();
+      return;
+    }
+
+    Alert.alert('Delete this conversation?', message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete Conversation', style: 'destructive', onPress: () => {
-        cancelActiveRequest('conversation-deleted');
-        setInput('');
-        setAttachments([]);
-        deleteConversation(session.id);
-        router.replace('/(app)/(tabs)');
-      }}
+      { text: 'Delete Conversation', style: 'destructive', onPress: confirmDelete }
     ]);
   };
 
@@ -499,7 +511,13 @@ export default function ChatScreen() {
                 {saving ? <ActivityIndicator /> : <Ionicons name={hasSavedCopy ? "save-outline" : "bookmark-outline"} size={24} color={colors.text} />}
               </TouchableOpacity>
               {session.isTemporary && (
-                <TouchableOpacity onPress={handleEndChat} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Delete conversation">
+                <TouchableOpacity
+                  onPress={handleEndChat}
+                  style={styles.actionBtn}
+                  testID="delete-conversation-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete conversation"
+                >
                   <Ionicons name="trash-outline" size={24} color={colors.error} />
                 </TouchableOpacity>
               )}

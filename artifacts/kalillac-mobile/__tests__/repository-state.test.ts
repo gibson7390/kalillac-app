@@ -2,13 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 import {
   appendTemporarySession,
   cancelledRequestUpdates,
-  clearSavedSessionAssociation,
-  deleteSavedSnapshotState,
-  deleteTemporaryConversationState,
+  deleteLogicalConversationState,
   hasSavedSnapshotAssociation,
   meaningfulActiveSessions,
   removeSavedSession,
   requestStateForStart,
+  resolveLogicalConversationId,
   saveSnapshotState,
   updateMessageById,
   updateSessionMessageById,
@@ -85,65 +84,58 @@ describe('temporary chat repository state', () => {
     });
   });
 
-  it('deletes only the selected saved snapshot', () => {
+  it('resolves a saved row to its logical conversation ID', () => {
     const first = { ...session('saved-first'), isTemporary: false };
     const second = { ...session('saved-second'), isTemporary: false };
+    const active = { ...session('conversation'), savedCopyId: first.id };
 
     expect(removeSavedSession([first, second], first.id).map(item => item.id)).toEqual(['saved-second']);
+    expect(resolveLogicalConversationId([active], [first, second], first.id)).toBe('conversation');
   });
 
-  it('leaves saved snapshots and temporary sessions independent', () => {
+  it('deletes an unsaved logical conversation without touching unrelated snapshots', () => {
     const temporary = session('temporary');
     const saved = { ...session('saved'), isTemporary: false };
-    const activeSessions = [temporary];
-    const savedSessions = [saved];
+    const unrelated = session('unrelated');
 
-    expect(removeSavedSession(savedSessions, saved.id)).toEqual([]);
-    expect(activeSessions).toEqual([temporary]);
-    expect(savedSessions).toEqual([saved]);
+    const next = deleteLogicalConversationState([temporary, unrelated], [saved], temporary.id);
+
+    expect(next.activeSessions.map(item => item.id)).toEqual(['unrelated']);
+    expect(next.savedSessions).toEqual([saved]);
   });
 
-  it('clears the live conversation link when its saved snapshot is deleted', () => {
-    const linked = { ...session('temporary'), savedCopyId: 'saved' };
+  it('deletes a saved logical conversation from both Active Chats and Saved', () => {
+    const linked = { ...session('continued-copy'), savedCopyId: 'saved' };
     const unrelated = { ...session('unrelated'), savedCopyId: 'other-saved' };
-    const saved = { ...session('saved'), isTemporary: false };
+    const saved = { ...session('saved'), isTemporary: false, sourceSessionId: 'original-conversation' };
     const otherSaved = { ...session('other-saved'), isTemporary: false };
 
-    const next = deleteSavedSnapshotState([linked, unrelated], [saved, otherSaved], saved.id);
+    const logicalId = resolveLogicalConversationId([linked, unrelated], [saved, otherSaved], saved.id);
+    const next = deleteLogicalConversationState([linked, unrelated], [saved, otherSaved], logicalId!);
 
+    expect(logicalId).toBe('original-conversation');
     expect(next.savedSessions.map(item => item.id)).toEqual(['other-saved']);
-    expect(next.activeSessions[0].savedCopyId).toBeUndefined();
-    expect(next.activeSessions[1].savedCopyId).toBe('other-saved');
+    expect(next.activeSessions.map(item => item.id)).toEqual(['unrelated']);
   });
 
   it('creates one saved snapshot and links it to the temporary conversation', () => {
     const temporary = session('temporary');
-    const snapshot = { ...session('saved'), isTemporary: false };
+    const snapshot = { ...session('saved'), isTemporary: false, sourceSessionId: temporary.id };
 
     const next = saveSnapshotState([temporary], [], temporary.id, snapshot);
 
     expect(next.savedSessions).toEqual([snapshot]);
     expect(next.activeSessions[0].savedCopyId).toBe(snapshot.id);
     expect(hasSavedSnapshotAssociation(next.activeSessions[0])).toBe(true);
+    expect(resolveLogicalConversationId(next.activeSessions, next.savedSessions, snapshot.id)).toBe(temporary.id);
   });
 
-  it('allows an unsaved conversation to be linked to a new snapshot again', () => {
-    const linked = { ...session('temporary'), savedCopyId: 'old-saved' };
-    const [unsaved] = clearSavedSessionAssociation([linked], 'old-saved');
-    const resaved = { ...unsaved, savedCopyId: 'new-saved' };
-
-    expect(unsaved.savedCopyId).toBeUndefined();
-    expect(hasSavedSnapshotAssociation(unsaved)).toBe(false);
-    expect(resaved.savedCopyId).toBe('new-saved');
-    expect(hasSavedSnapshotAssociation(resaved)).toBe(true);
-  });
-
-  it('deletes only a temporary conversation that has no saved copy', () => {
+  it('deletes a temporary conversation without a saved copy', () => {
     const target = session('target');
     const unrelated = session('unrelated');
     const saved = { ...session('saved'), isTemporary: false };
 
-    const next = deleteTemporaryConversationState([target, unrelated], [saved], target.id);
+    const next = deleteLogicalConversationState([target, unrelated], [saved], target.id);
 
     expect(next.activeSessions.map(item => item.id)).toEqual(['unrelated']);
     expect(next.savedSessions.map(item => item.id)).toEqual(['saved']);
@@ -155,7 +147,7 @@ describe('temporary chat repository state', () => {
     const targetSaved = { ...session('target-saved'), isTemporary: false };
     const otherSaved = { ...session('other-saved'), isTemporary: false };
 
-    const next = deleteTemporaryConversationState(
+    const next = deleteLogicalConversationState(
       [target, unrelated],
       [targetSaved, otherSaved],
       target.id,
@@ -186,7 +178,7 @@ describe('temporary chat repository state', () => {
         requestStatus: 'streaming' as const,
       }],
     };
-    const deleted = deleteTemporaryConversationState([streaming], [], streaming.id);
+    const deleted = deleteLogicalConversationState([streaming], [], streaming.id);
     const afterLateDelta = updateSessionMessageById(
       deleted.activeSessions,
       streaming.id,
@@ -197,7 +189,7 @@ describe('temporary chat repository state', () => {
     expect(afterLateDelta).toEqual([]);
   });
 
-  it('supports the canonical save, unsave, resave, and delete-both lifecycle', () => {
+  it('supports the canonical save, delete-from-saved, and delete-from-chat lifecycle', () => {
     const conversation = {
       ...session('conversation'),
       title: 'Meaningful chat',
@@ -207,35 +199,37 @@ describe('temporary chat repository state', () => {
       ...conversation,
       id: 'saved-first',
       isTemporary: false,
+      sourceSessionId: conversation.id,
     };
 
     const firstSave = saveSnapshotState([conversation], [], conversation.id, firstSnapshot);
     expect(firstSave.savedSessions).toHaveLength(1);
     expect(hasSavedSnapshotAssociation(firstSave.activeSessions[0])).toBe(true);
 
-    const unsaved = deleteSavedSnapshotState(
+    const deletedFromSaved = deleteLogicalConversationState(
       firstSave.activeSessions,
       firstSave.savedSessions,
-      firstSnapshot.id,
+      resolveLogicalConversationId(firstSave.activeSessions, firstSave.savedSessions, firstSnapshot.id)!,
     );
-    expect(unsaved.savedSessions).toEqual([]);
-    expect(hasSavedSnapshotAssociation(unsaved.activeSessions[0])).toBe(false);
+    expect(deletedFromSaved.activeSessions).toEqual([]);
+    expect(deletedFromSaved.savedSessions).toEqual([]);
 
     const secondSnapshot = {
       ...conversation,
       id: 'saved-second',
       isTemporary: false,
+      sourceSessionId: conversation.id,
     };
     const secondSave = saveSnapshotState(
-      unsaved.activeSessions,
-      unsaved.savedSessions,
+      [conversation],
+      [],
       conversation.id,
       secondSnapshot,
     );
     expect(secondSave.savedSessions.map(item => item.id)).toEqual(['saved-second']);
     expect(secondSave.activeSessions[0].savedCopyId).toBe('saved-second');
 
-    const deleted = deleteTemporaryConversationState(
+    const deleted = deleteLogicalConversationState(
       secondSave.activeSessions,
       secondSave.savedSessions,
       conversation.id,

@@ -2,7 +2,11 @@ import React from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { useChatRepository, ChatSession } from '@/contexts/ChatRepositoryContext';
+import {
+  useChatRepository,
+  ChatSession,
+  resolveLogicalConversationId,
+} from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
@@ -12,7 +16,13 @@ import { Button } from '@/components/Button';
 export default function SavedTab() {
   const { colors } = usePreferences();
   const insets = useSafeAreaInsets();
-  const { savedSessions, deleteSavedSession, continueSavedSession, createSession } = useChatRepository();
+  const {
+    activeSessions,
+    savedSessions,
+    deleteLogicalConversation,
+    continueSavedSession,
+    createSession,
+  } = useChatRepository();
 
   const handleOpen = async (id: string) => {
     try {
@@ -26,17 +36,25 @@ export default function SavedTab() {
     }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = (savedSessionId: string) => {
+    const logicalConversationId = resolveLogicalConversationId(
+      activeSessions,
+      savedSessions,
+      savedSessionId,
+    );
+    if (!logicalConversationId) return;
+
+    const confirmDelete = () => deleteLogicalConversation(logicalConversationId);
     if (Platform.OS === 'web') {
-      if (globalThis.confirm('Remove this saved copy? Any active temporary conversation will remain available and return to an unsaved state.')) {
-        deleteSavedSession(id);
+      if (globalThis.confirm('Delete this conversation? This removes the saved copy and any active version of this chat. This cannot be undone.')) {
+        confirmDelete();
       }
       return;
     }
 
-    Alert.alert('Remove saved copy?', 'This removes only the saved snapshot. Any active temporary conversation will remain available and return to an unsaved state.', [
+    Alert.alert('Delete this conversation?', 'This removes the saved copy and any active version of this chat. This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove Saved Copy', style: 'destructive', onPress: () => deleteSavedSession(id) }
+      { text: 'Delete Conversation', style: 'destructive', onPress: confirmDelete }
     ]);
   };
 
@@ -64,8 +82,9 @@ export default function SavedTab() {
       <TouchableOpacity 
         style={styles.deleteBtn}
         onPress={() => handleDelete(item.id)}
+        testID={`delete-saved-conversation-${item.id}`}
         accessibilityRole="button"
-        accessibilityLabel="Remove saved copy"
+        accessibilityLabel="Delete conversation"
       >
         <Ionicons name="trash-outline" size={20} color={colors.error} />
       </TouchableOpacity>
