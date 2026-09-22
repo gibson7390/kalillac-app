@@ -1,0 +1,56 @@
+MILESTONE 1B — FIX IOS MARKDOWN BUNDLE BLOCKER ONLY
+
+The current iOS/Metro bundle fails because the existing Markdown dependency chain resolves through:
+
+react-native-markdown-display
+→ markdown-it@10.0.0
+→ Node core punycode
+
+This produces an iOS Metro bundle failure / HTTP 500.
+
+Fix only this compatibility issue.
+
+Requirements:
+
+1. First inspect the exact installed/resolved dependency tree and current Markdown usage in the Kalillac mobile shell.
+2. Prefer the smallest safe fix. Determine whether upgrading or overriding the Markdown parser/renderer dependency to a current React-Native-compatible version removes the Node-core punycode import.
+3. Do not add a Node-core polyfill merely to hide the incompatibility unless there is no cleaner React Native-compatible solution.
+4. If the current react-native-markdown-display package cannot be made Metro/iOS-compatible cleanly, replace it with a maintained React Native Markdown renderer that:
+    * renders native React Native components, not a WebView
+    * supports headings, bold, italic, lists, links, code blocks, inline code and tables as currently used
+    * allows our existing styles/rules to be preserved
+    * does not require Node core modules in the native bundle
+5. Preserve the current Kalillac Markdown appearance and chat behavior as closely as possible.
+6. Preserve the existing security/privacy behavior:
+    * remote Markdown images remain blocked
+    * raw HTML remains blocked
+    * links remain user-initiated
+    * no new network requests
+    * no prompt/response persistence
+7. Do not redesign the UI.
+8. Do not begin Milestone 2.
+9. Do not add backend services, AI providers, subscriptions, databases, analytics, authentication, or durable saved chats.
+10. After the fix run:
+
+* dependency install verification
+* TypeScript check
+* all existing Jest tests
+* Expo dependency compatibility check
+* native iOS Metro bundle verification
+* existing web/preview smoke test
+
+11. Stop after the Markdown/iOS bundle blocker is fixed.
+
+At completion report:
+
+* root cause confirmed
+* dependency/version before and after
+* exact files changed
+* whether the renderer was upgraded or replaced
+* whether any Node-core module remains in the native Markdown dependency path
+* TypeScript result
+* Jest result
+* iOS Metro bundle result
+* web preview result
+
+Make no unrelated changes.
