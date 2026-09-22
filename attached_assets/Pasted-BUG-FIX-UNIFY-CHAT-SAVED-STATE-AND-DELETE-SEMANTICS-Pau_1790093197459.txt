@@ -1,0 +1,141 @@
+BUG FIX — UNIFY CHAT/SAVED STATE AND DELETE SEMANTICS
+
+Pause visual-polish work. The current relationship between temporary conversations and saved snapshots is inconsistent in manual testing.
+
+Current observed bug:
+
+1. A temporary conversation is explicitly saved.
+2. The saved snapshot is deleted from the Saved tab.
+3. The active temporary conversation still presents itself as saved.
+4. The chat no longer offers the normal Save action correctly.
+5. The user cannot cleanly return the conversation to an unsaved state.
+
+Fix the state model and UI synchronization before further visual work.
+
+Canonical v1 behavior
+
+Treat a live temporary conversation and its optional saved snapshot as related but distinct objects.
+
+A. Save
+
+When the user presses Save:
+
+* create one explicit saved snapshot
+* associate/link that saved snapshot with the temporary conversation
+* show the appropriate saved state in the conversation
+* subsequent conversation changes must not automatically modify the saved snapshot
+* Update saved copy remains explicit
+
+B. Delete from Saved
+
+Deleting a snapshot from the Saved tab means remove the saved copy / unsave the conversation.
+
+After confirmed deletion:
+
+* remove only that saved snapshot
+* if the related temporary conversation still exists, clear its saved-snapshot association
+* immediately update that conversation’s UI to an unsaved state
+* remove Saved copy updates only by choice
+* remove Update saved copy
+* restore the normal Save action
+* allow the user to save the conversation again
+* do not delete the active temporary conversation
+
+Confirmation copy should clearly explain that this removes the saved copy while leaving any active temporary conversation available.
+
+C. Delete from inside the conversation
+
+The trash action inside an active chat means delete this conversation.
+
+On confirmation:
+
+* delete the temporary conversation from the current in-memory session
+* stop any active stream
+* prevent late streaming deltas
+* remove it from Home → Active Chats
+* navigate back appropriately
+
+If that temporary conversation currently has an associated saved snapshot:
+
+* delete the associated saved snapshot as part of the same confirmed conversation deletion
+* confirmation text must explicitly state that both the chat and its saved copy will be deleted
+
+If no saved snapshot exists:
+
+* delete only the temporary conversation
+
+Preserve unrelated chats and unrelated snapshots.
+
+D. Active Chats
+
+Do not show empty/unstarted temporary sessions such as:
+
+New Chat · Temporary · 0 messages
+
+Meaningful active temporary conversations must remain resumable during the current app session.
+
+Filtering empty/unstarted sessions from presentation must not delete or alter meaningful conversations.
+
+Do not introduce persistence.
+
+E. Keep deletion architecture reusable
+
+Keep the temporary-conversation delete action centralized/reusable so the same deletion behavior can later be triggered from other UI surfaces if approved.
+
+Do not implement swipe gestures, new gesture behavior, or additional delete controls in this task.
+
+The current chat-header Delete action remains the required customer deletion path for now.
+
+Required tests
+
+Add focused regression coverage proving:
+
+* Save creates one snapshot and links it to the temporary conversation.
+* Delete from Saved removes that snapshot and clears the live conversation’s saved state.
+* After deleting the saved copy, the conversation can be saved again.
+* Update saved copy is available only when an associated saved snapshot exists.
+* Deleting a conversation with no saved copy removes only the temporary conversation.
+* Deleting a conversation with a saved copy removes both the temporary conversation and that associated snapshot.
+* Unrelated conversations and snapshots remain intact.
+* Active-stream conversation deletion prevents late deltas.
+* Empty/unstarted sessions do not appear in Active Chats.
+
+Manual preview verification
+
+Demonstrate this exact sequence in the actual preview:
+
+1. Create a temporary conversation.
+2. Save it.
+3. Confirm Saved contains it.
+4. Delete it from Saved.
+5. Reopen the active temporary conversation.
+6. Confirm it now appears unsaved and the normal Save action works again.
+7. Save it again.
+8. Delete the conversation from inside the chat thread.
+9. Confirm both the active chat and its linked saved copy are gone.
+
+Do not treat repository tests alone as sufficient. The actual UI flow must be manually verified.
+
+Then run:
+
+* TypeScript
+* complete Jest suite
+* expo install --check
+* Expo Doctor
+* iOS Metro export
+* preview smoke test
+
+Completion report
+
+Report:
+
+* root cause
+* state-model change
+* exact files changed
+* updated Jest total
+* results of the exact nine-step manual sequence above
+* confirmation that no new persistence path was introduced
+
+Do not continue visual polish and do not begin Milestone 2.
+
+Stop after this behavior is demonstrably correct.
