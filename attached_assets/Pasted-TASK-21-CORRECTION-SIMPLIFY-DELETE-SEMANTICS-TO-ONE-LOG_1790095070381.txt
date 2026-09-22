@@ -1,0 +1,147 @@
+TASK #21 CORRECTION — SIMPLIFY DELETE SEMANTICS TO ONE LOGICAL CONVERSATION
+
+Manual acceptance testing failed. Do not mark Task #21 complete.
+
+Observed results:
+
+* creating a new chat and seeing it on Home works
+* unsaved chats do not appear in Saved, correct
+* pressing Save adds the chat to Saved, correct
+* deleting from inside the actual conversation thread does not work, incorrect
+* deleting from Saved removes it from Saved but leaves it in Active Chats, incorrect
+
+The current implementation still exposes the internal distinction between a live temporary conversation and its saved snapshot. For v1, that is too confusing.
+
+Canonical customer-facing model
+
+Treat the temporary conversation and its optional saved snapshot as one logical conversation in the UI.
+
+Saving changes its storage state. It does not create something the user should have to think of as a separate conversation.
+
+A. Unsaved temporary conversation
+
+* appears in Active Chats after meaningful content exists
+* does not appear in Saved
+* remains memory-only
+* can be explicitly saved
+
+B. Save
+
+When the user presses Save:
+
+* create/update the explicit saved snapshot backing for that conversation
+* link it to the same logical conversation
+* show the conversation in Saved
+* keep explicit Update Saved Copy semantics for later changes
+
+Do not automatically update the saved copy as the conversation continues.
+
+C. Delete from inside the conversation
+
+The trash icon in the conversation header means:
+
+Delete this conversation.
+
+On confirmed deletion:
+
+* remove the active temporary conversation
+* remove it from Home → Active Chats
+* if it has a linked saved snapshot, delete that snapshot too
+* remove it from Saved
+* stop active streaming
+* prevent late deltas
+* navigate back to Home
+* preserve unrelated conversations
+
+The trash button must actually work in the current web preview and native path.
+
+Confirmation copy:
+
+If unsaved:
+Delete this conversation? This cannot be undone.
+
+If saved:
+Delete this conversation? Its saved copy will also be deleted. This cannot be undone.
+
+D. Delete from Saved
+
+The trash icon in Saved also means:
+
+Delete this conversation.
+
+On confirmed deletion:
+
+* remove the saved snapshot
+* remove the linked active temporary conversation if it still exists
+* remove it from Home → Active Chats
+* remove it from Saved
+* stop any active stream associated with that conversation
+* preserve unrelated conversations and saved chats
+
+Do not leave a hidden/live Active Chats version behind after the user deletes the conversation from Saved.
+
+Confirmation copy should clearly state:
+
+Delete this conversation? This removes the saved copy and any active version of this chat. This cannot be undone.
+
+E. Do not implement “unsave” in this task
+
+Do not overload the trash icon with “remove saved copy but keep the active conversation.”
+
+If a future product decision adds that behavior, it must be a separate clearly named action such as Remove from Saved.
+
+Do not add that feature now.
+
+F. Empty sessions
+
+Continue hiding unstarted 0 messages sessions from Active Chats.
+
+Do not introduce persistence.
+
+Required regression coverage
+
+Add or update tests proving:
+
+* unsaved meaningful chats appear only in Active Chats
+* Save links the saved backing to the same logical conversation
+* saved conversations appear in Saved
+* deleting an unsaved conversation from inside the thread removes it from Active Chats
+* deleting a saved conversation from inside the thread removes it from both Active Chats and Saved
+* deleting a saved conversation from Saved removes it from both Saved and Active Chats
+* unrelated conversations remain untouched
+* active-stream deletion stops late chunks
+* empty sessions remain hidden
+
+Manual acceptance sequence
+
+Manually verify as much as the environment supports, and structure tests around this exact sequence:
+
+1. Create a conversation and send a message.
+2. Confirm it appears in Active Chats.
+3. Confirm it does not appear in Saved.
+4. Save it.
+5. Confirm it appears in Saved.
+6. Open the conversation and delete it from the thread.
+7. Confirm it is gone from both Active Chats and Saved.
+8. Create another conversation and save it.
+9. Delete it from Saved.
+10. Confirm it is gone from both Saved and Active Chats.
+
+Run:
+
+* TypeScript
+* complete Jest suite
+* expo install --check
+* Expo Doctor
+* iOS Metro export
+* preview smoke test
+
+Report:
+
+* root cause
+* exact files changed
+* updated test count
+* confirmation that both delete entry points now invoke the same centralized logical-conversation deletion behavior
+* confirmation that no persistence path was introduced
+
+Stop after this correction. Do not continue visual polish or Milestone 2.
