@@ -1,8 +1,25 @@
-# [Project name]
+# Kalillac
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A privacy-first consumer iPhone AI application. Milestone 1 is a native Expo shell with mock services only, not a production AI service.
+
+## Mandatory project boundaries
+
+- The exclusive source repository is private `gibson7390/kalillac-app`. Its Git origin and GitHub private/read/write access were verified before application generation.
+- Never connect to, read from, import, modify, or push to `gibson7390/kalillac`; it is the separate live web product.
+- The canonical plan and latest architecture-approval revisions in `attached_assets/` govern scope. Preserve the approved architecture, and stop after Milestone 1 for review.
+- All temporary conversation content and Milestone 1 saved snapshots stay in memory. Never persist content through filesystem, AsyncStorage, SQLite, SecureStore, query caches, navigation restoration, logging or diagnostics.
+- Preferences alone may persist. Save is an explicit detached snapshot; only Update saved copy replaces it. Attachment files, images, filenames, extracted text, descriptions and metadata are excluded from snapshots.
+- Milestone 1 does not implement the encrypted vault, backend, AI/search providers, purchases, authentication, databases or production metering. Do not portray mocks as production capabilities.
+- Do not automatically load remote Markdown images.
+- Final brand artwork/colors are not supplied; styling is provisional and replaceable through semantic tokens.
+- Future production remains portable: Expo/TypeScript mobile, independently hosted Python/FastAPI, server-side provider keys, no mandatory Replit runtime services. CryptoKit/Keychain storage follows physical-iPhone shell approval, not before.
+- Future backend expiry policy: approximately 60-minute idle timeout, 24-hour absolute backstop, immediate best-effort End/New Chat purge. Do not implement it in Milestone 1.
 
 ## Run & Operate
+
+- Managed mobile preview: `artifacts/kalillac-mobile: expo`.
+- Mobile package: `artifacts/kalillac-mobile`.
+- The starter API, database libraries and Canvas predate the mobile shell and are not dependencies of its product behavior. Do not expand them for Milestone 1.
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages

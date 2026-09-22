@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "sk2ejErOU9YVa46qaNkd3"
+uri = "file://docs/MILESTONE_1_REPORT.md"
+type = "text"
+title = "Milestone 1 handoff report"
+description = "Exact files, full dependency list, architecture, iPhone run instructions, verification results and known limitations."
+logical_id = "b1c5f325-0ef9-4acc-aafb-e02e7205524c"
+content_hash = "sha256:93c945cdcbe9e611ab89d83dafec4879c143387dfbd53fed8c9492448a566db7"
+size = 8831
+mtime_ms = 1790073376282
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:fdd9148f-74d5-4a10-8db9-a9ea80557c6d/b1c5f325-0ef9-4acc-aafb-e02e7205524c/e56be1a7-0e87-4de4-8da3-cbf92445c098"
+storage_version_token = "1790073421242893"
+content_type = "text/markdown"
