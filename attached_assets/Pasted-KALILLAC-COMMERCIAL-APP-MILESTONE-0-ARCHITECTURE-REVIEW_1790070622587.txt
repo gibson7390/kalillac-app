@@ -1,0 +1,333 @@
+KALILLAC COMMERCIAL APP — MILESTONE 0 ARCHITECTURE REVIEW
+
+You are the primary implementation engineer for Kalillac, a serious commercial privacy-first AI mobile application intended for Apple App Store release.
+
+DO NOT WRITE CODE, CREATE FILES, INITIALIZE SERVICES, DEPLOY ANYTHING, OR MODIFY A REPOSITORY YET.
+
+Your task in this turn is architecture and implementation planning only.
+
+If the attached file Kalillac_Commercial_App_Canonical_Project_Plan.md is available, read it completely and treat it as the source of truth. Do not silently change product decisions contained in it.
+
+SOURCE OWNERSHIP
+
+The permanent GitHub repository is:
+
+gibson7390/kalillac-app
+
+It is private.
+
+This project must never be connected to or modify:
+
+gibson7390/kalillac
+
+That repository belongs to the existing Kalillac web product and is out of scope.
+
+PRODUCT PURPOSE
+
+Kalillac is not “another ChatGPT wrapper.”
+
+Its primary commercial identity is:
+
+Private by default. Save only what you choose.
+
+Supporting promise:
+
+Powerful AI without automatically turning every conversation into a permanent record.
+
+The product should provide the polished AI experience people expect from major consumer AI applications while retaining substantially less conversation data by default.
+
+NON-NEGOTIABLE PRIVACY MODEL
+
+Temporary Chat is the default.
+
+A user must be able to chat without creating a Kalillac username, password or email profile.
+
+Unsaved conversation content may exist while active only in:
+
+* device memory
+* temporary backend RAM/session state
+* a model/search provider request when required to answer
+
+Temporary conversation content must NOT be written to:
+
+* PostgreSQL
+* Supabase
+* SQLite
+* AsyncStorage
+* SecureStore
+* iCloud
+* a conversation-history database
+* analytics
+* crash-report payloads
+* session replay
+* permanent application logs
+* a vector database
+* persistent document storage
+
+Temporary chats must never touch Supabase/Postgres.
+
+There must be explicit session destruction plus server-side TTL for abandoned sessions.
+
+Saving is an explicit user action:
+
+Save this chat
+
+For v1 this means:
+
+Save on this iPhone
+
+Saved chats should be encrypted locally.
+
+Do not build cloud chat sync in v1.
+
+AI EXPERIENCE
+
+Default mode:
+
+Auto
+
+Manual modes:
+
+Fast
+Smart
+Deep
+
+Planned production model strategy:
+
+Fast → Groq gpt-oss-120b, with Groq Zero Data Retention enabled
+
+Smart → OpenAI GPT-5.6 Luna, with store=false for temporary conversations
+
+Deep → OpenAI GPT-5.6 Terra, with store=false for temporary conversations
+
+Auto → server-side Kalillac routing based on task difficulty, required tools, files/images, current-information requirements, cost, privacy and context.
+
+Do not send every request to the most expensive model.
+
+Prefer deterministic/local processing where appropriate.
+
+SEARCH PRIVACY
+
+A search provider must never receive the full conversation.
+
+Intended path:
+
+user request
+→ Kalillac backend derives minimal search query
+→ search provider receives only that query
+→ retrieved results return
+→ necessary snippets plus necessary conversational context are sent to the AI model
+→ answer contains citations
+
+Brave Search API is currently preferred if its commercial terms are suitable. Tavily is an acceptable alternative.
+
+TEMPORARY ATTACHMENTS
+
+PDFs, documents and images must follow the temporary-chat privacy model.
+
+Prefer:
+
+* RAM when practical
+* encrypted temporary storage only when necessary
+* random object identifiers
+* file type/size validation
+* short TTL
+* automatic cleanup
+
+No temporary attachments in Supabase Storage.
+
+No vector database for temporary content.
+
+Avoid provider file APIs that persist files when direct request processing can be used instead.
+
+REQUIRED PRODUCT EXPERIENCE
+
+The architecture must support:
+
+* general AI chat
+* Auto / Fast / Smart / Deep
+* web search
+* research with citations
+* PDFs and documents
+* image understanding
+* coding/debugging
+* study/tutoring
+* attachments
+* long conversations
+* streaming responses
+* stop generation
+* regenerate
+* edit prompt
+* copy/share
+* excellent Markdown
+* syntax-highlighted code
+* tables
+* temporary chats
+* local encrypted saved chats
+* provider/privacy details
+* dark/light mode
+* polished onboarding
+* subscription/paywall
+* accessibility
+* VoiceOver
+* Dynamic Type
+* Reduce Motion
+* haptics
+* polished loading/error/offline/empty states
+
+Possible task entry points:
+
+Research
+Study
+Analyze
+Code
+Create
+Search
+
+These should use the same underlying conversation system rather than becoming duplicated mini-apps.
+
+VISUAL QUALITY
+
+This is a commercial consumer application.
+
+A generic AI-generated UI is unacceptable.
+
+Avoid:
+
+* gratuitous gradients
+* neon AI styling
+* giant rounded cards everywhere
+* generic chatbot templates
+* copying ChatGPT’s appearance
+
+Aim for:
+
+* distinct Kalillac visual identity
+* excellent typography
+* restrained hierarchy
+* excellent spacing
+* premium light and dark themes
+* subtle animation
+* native-feeling interactions
+* polished streaming
+* professional paywall
+* excellent attachment workflow
+* clear but unobtrusive privacy indicators
+
+MOBILE STACK
+
+Preferred:
+
+* React Native
+* Expo
+* TypeScript
+* Expo Router
+
+Production backend:
+
+* Python
+* FastAPI
+* independently hosted infrastructure such as DigitalOcean
+
+Replit is a development tool only.
+
+Production must continue operating if the Replit subscription is canceled.
+
+Therefore do not propose mandatory production use of:
+
+* Replit Database
+* Replit Auth
+* Replit Object Storage
+* Replit hosting
+* Replit-specific secrets/runtime APIs
+* any proprietary Replit service that prevents independent deployment
+
+GitHub is the permanent source of truth.
+
+SUBSCRIPTIONS
+
+Provisional Plus price:
+
+$7.99/month
+
+Preferred stack:
+
+* Apple StoreKit
+* RevenueCat
+* anonymous RevenueCat App User IDs
+
+No traditional Kalillac account should be required to subscribe.
+
+Restore Purchases must be supported.
+
+Provider cost controls are server-side.
+
+Expensive Deep usage must never be truly unlimited.
+
+LOGGING AND ANALYTICS
+
+Never persist:
+
+* prompts
+* completions
+* search-query text
+* uploaded-file contents
+* authorization secrets
+
+Permitted operational telemetry includes:
+
+* request ID
+* opaque session identifier
+* provider/model
+* input/output token counts
+* estimated provider cost
+* latency
+* success/failure
+* error class
+* tool/search usage
+* subscription tier
+* platform
+
+No advertising SDKs.
+
+No session replay.
+
+No conversation-content analytics.
+
+DEVELOPMENT STRATEGY
+
+We are moving quickly, but we will use controlled milestones.
+
+Milestone 1 is the premium mobile UI shell using mock/local data.
+
+Do not connect paid AI APIs during Milestone 1.
+
+It must eventually be testable on a physical iPhone and include the major screens/states necessary to judge whether Kalillac feels like a professional paid application.
+
+YOUR RESPONSE
+
+Do not implement anything yet.
+
+Return a detailed plan containing:
+
+1. Overall architecture
+2. Data-flow diagram for Temporary Chat
+3. Data-flow diagram for Saved Chat
+4. Proposed source-directory tree
+5. Navigation architecture
+6. State-management strategy
+7. Exact separation between temporary and persistent state
+8. Proposed encrypted local-storage strategy for saved chats
+9. Design-system approach
+10. Complete Milestone 1 screen inventory
+11. Reusable component inventory
+12. Dependencies you propose, with justification for every significant dependency
+13. Any dependency that sends telemetry or user data off-device
+14. Milestone 1 implementation order
+15. How the source will remain portable to GitHub and independent infrastructure
+16. Privacy/security risks you see in this design
+17. Anything you recommend changing from the specification, with specific technical reasoning
+
+Avoid unnecessary enterprise architecture.
+
+Do not create code or files until this plan has been reviewed and explicitly approved.
