@@ -1,0 +1,149 @@
+CRITICAL BUG FIX — MAKE BOTH DELETE ENTRY POINTS USE ONE CENTRAL LOGICAL-CONVERSATION DELETE PATH
+
+Manual acceptance testing still fails. Do not mark the current task complete.
+
+Observed behavior:
+
+* opening a chat creates an Active Chat correctly
+* it does not appear in Saved automatically
+* pressing Save adds it to Saved correctly
+* the trash button inside the chat thread does not delete the conversation
+* deleting from Saved removes only the Saved item
+* the same conversation remains visible in Home → Active Chats
+
+Automated repository tests are not enough. The actual UI wiring is wrong.
+
+Required architecture
+
+Implement exactly one centralized logical-conversation deletion operation and make both delete entry points call it.
+
+The centralized operation must accept the logical conversation/session ID and:
+
+* remove the active temporary conversation
+* remove any linked saved snapshot
+* stop any active stream
+* prevent late deltas
+* preserve unrelated conversations and snapshots
+* update shared state immediately so Home and Saved both rerender correctly
+
+Do not maintain separate deletion semantics for Chat and Saved.
+
+A. Delete from inside Chat
+
+Trace this exact path:
+
+chat header trash button
+→ confirmation
+→ central deleteLogicalConversation(sessionId)
+→ shared repository state updates
+→ navigate Home
+
+Verify:
+
+* the trash button has the correct onPress
+* the correct current session ID is passed
+* the confirmation callback actually invokes deletion
+* no stale closure prevents the call
+* navigation does not occur before deletion
+* no overlay intercepts the press
+* web preview and native paths both work
+
+If the conversation is saved, delete both the live chat and linked saved snapshot.
+
+If it is unsaved, delete only the live chat.
+
+B. Delete from Saved
+
+Trace this exact path:
+
+Saved row trash button
+→ confirmation
+→ resolve the linked active conversation/session ID
+→ central deleteLogicalConversation(sessionId)
+→ shared repository state updates
+
+Do not call a snapshot-only deletion method from the Saved trash action.
+
+If the Saved record contains only a snapshot ID, use its stored link/source session ID to resolve the logical conversation.
+
+After confirming deletion:
+
+* the Saved row must disappear
+* the Active Chat must disappear from Home
+* unrelated chats remain
+
+C. Shared state
+
+Diagnose whether the Home screen is rendering stale state.
+
+Confirm that Home → Active Chats and Saved both consume the same current repository/context state and rerender after deletion.
+
+Do not use duplicated local arrays or stale cached copies for Active Chats or Saved.
+
+D. Keep Save behavior
+
+Preserve:
+
+* unsaved chats appear only in Active Chats
+* Save adds the same logical conversation to Saved
+* later chat changes do not silently update the saved snapshot
+* Update Saved Copy remains explicit
+* no persistence is introduced
+
+E. Empty chats
+
+Continue hiding 0 messages sessions from Active Chats.
+
+Required tests
+
+Add or update tests around the centralized delete operation proving:
+
+* unsaved chat delete removes Active Chat only
+* saved chat delete removes both Active Chat and Saved snapshot
+* Saved-row delete removes both Active Chat and Saved snapshot
+* unrelated chats remain
+* active-stream deletion prevents late chunks
+* Home selectors no longer include a deleted session
+* Saved selectors no longer include the linked snapshot
+
+Also add focused tests for the actual UI handler wiring if practical:
+
+* chat delete handler calls the centralized delete operation with the current session ID
+* Saved delete handler resolves the correct session ID and calls the same centralized operation
+
+Manual acceptance behavior
+
+The implementation is not accepted until this exact behavior is possible:
+
+1. Create chat and send a message.
+2. Confirm it appears in Active Chats.
+3. Confirm it is not in Saved.
+4. Save it.
+5. Confirm it appears in Saved.
+6. Delete it from inside the chat thread.
+7. Confirm it is gone from both Active Chats and Saved.
+8. Create another chat and save it.
+9. Delete it from Saved.
+10. Confirm it is gone from both Saved and Active Chats.
+
+Run:
+
+* TypeScript
+* complete Jest suite
+* expo install --check
+* Expo Doctor
+* iOS Metro export
+* preview smoke test
+
+Report:
+
+* the exact root cause of the chat-header trash failure
+* the exact root cause of Saved deletion leaving the Home chat behind
+* exact files changed
+* centralized deletion function/API created or modified
+* updated Jest total
+* confirmation that both UI delete entry points now call the same central deletion operation
+
+Do not continue visual polish.
+Do not begin Milestone 2.
+Stop after this correction.
