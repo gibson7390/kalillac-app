@@ -23,7 +23,7 @@ export default function PrivacyScreen() {
         </View>
         <ThemedText variant="h1" style={styles.title}>Privacy</ThemedText>
         <ThemedText variant="body" color="secondary" style={styles.subtitle}>
-          This explains the Milestone 1B demonstration. It is not a final legal policy or production security guarantee.
+          This explains the Milestone 2A development connection. It is not a final legal policy or production security guarantee.
         </ThemedText>
 
         <Section title="Temporary Chats">
@@ -35,7 +35,7 @@ export default function PrivacyScreen() {
         </Section>
 
         <Section title="Providers">
-          No AI or search provider receives prompts in this preview. Responses are mock fixtures. Future provider access will require verification.
+          Text submitted for a response is sent to the Kalillac backend and its development OpenRouter provider. Kalillac does not persist prompts, responses, or transcripts, but the provider's own retention terms are not a production privacy guarantee.
         </Section>
 
         <Section title="Other Boundaries">

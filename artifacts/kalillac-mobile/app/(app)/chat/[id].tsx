@@ -24,7 +24,27 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 
-import { MockChatService } from '@/services/MockChatService';
+import { BackendChatError, KalillacChatService } from '@/services/KalillacChatService';
+import type { ChatTransportMessage, ChatTransport } from '@/services/chatTransport';
+
+function toBackendMessages(
+  messages: ChatMessage[],
+  prompt?: string,
+  appendPrompt = false,
+): ChatTransportMessage[] {
+  const normalized = messages
+    .filter(message => message.content.trim())
+    .map(message => ({
+      role: message.role === 'ai' ? 'assistant' as const : 'user' as const,
+      content: message.content.trim(),
+    }));
+
+  if (prompt?.trim() && (appendPrompt || normalized.at(-1)?.role !== 'user')) {
+    normalized.push({ role: 'user', content: prompt.trim() });
+  }
+
+  return normalized.slice(-40);
+}
 
 export default function ChatScreen() {
   const { id, task } = useLocalSearchParams<{ id: string; task?: string }>();
@@ -46,7 +66,7 @@ export default function ChatScreen() {
   const [attachments, setAttachments] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const chatServiceRef = useRef<MockChatService | null>(null);
+  const chatServiceRef = useRef<ChatTransport | null>(null);
   const activeMessageIdRef = useRef<string | null>(null);
   const cancelledMessageIdsRef = useRef<Set<string>>(new Set());
   const inputRef = useRef<TextInput>(null);
@@ -97,7 +117,11 @@ export default function ChatScreen() {
     );
   }
 
-  const runStream = async (sessionId: string, aiMessageId: string) => {
+  const runStream = async (
+    sessionId: string,
+    aiMessageId: string,
+    backendMessages: ChatTransportMessage[],
+  ) => {
     if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
     updateMessage(sessionId, aiMessageId, { requestStatus: 'streaming', requestError: undefined });
     updateRequestState(sessionId, { status: 'streaming', messageId: aiMessageId });
@@ -116,7 +140,7 @@ export default function ChatScreen() {
       return;
     }
 
-    const service = new MockChatService();
+    const service = new KalillacChatService();
     chatServiceRef.current = service;
 
     try {
@@ -132,16 +156,20 @@ export default function ChatScreen() {
           activeMessageIdRef.current = null;
           setIsGenerating(false);
         }
-      }, task);
+      }, task, backendMessages, activeMode);
     } catch (e) {
       if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
       updateMessage(sessionId, aiMessageId, {
         content: '',
         isStreaming: false,
         requestStatus: 'api-failure',
-        requestError: 'stream-interrupted',
+        requestError: e instanceof BackendChatError ? e.code : 'backend-failure',
       });
-      updateRequestState(sessionId, { status: 'api-failure', messageId: aiMessageId, error: 'stream-interrupted' });
+      updateRequestState(sessionId, {
+        status: 'api-failure',
+        messageId: aiMessageId,
+        error: e instanceof BackendChatError ? e.code : 'backend-failure',
+      });
       activeMessageIdRef.current = null;
       setIsGenerating(false);
     }
@@ -161,6 +189,11 @@ export default function ChatScreen() {
     }
 
     const userText = input.trim();
+    if (!userText && attachments.length > 0) {
+      Alert.alert('Attachments unavailable', 'File requests are not supported in this milestone.');
+      return;
+    }
+    const backendMessages = toBackendMessages(session.messages, userText, true);
     setInput('');
     const currentAttachments = [...attachments];
     setAttachments([]);
@@ -183,7 +216,7 @@ export default function ChatScreen() {
     });
     beginRequest(session.id, userText, aiMessageId);
 
-    runStream(session.id, aiMessageId);
+    runStream(session.id, aiMessageId, backendMessages);
 
     setTimeout(() => {
       inputRef.current?.focus();
@@ -209,7 +242,7 @@ export default function ChatScreen() {
       retryCount: (message.retryCount ?? 0) + 1,
     });
     beginRequest(session.id, message.requestPrompt, message.id, true);
-    runStream(session.id, message.id);
+    runStream(session.id, message.id, toBackendMessages(session.messages, message.requestPrompt));
   };
 
   const handleRegenerate = () => {
@@ -238,7 +271,7 @@ export default function ChatScreen() {
       });
       beginRequest(session.id, lastUserMsg.content, aiMessageId, true);
       
-      runStream(session.id, aiMessageId);
+      runStream(session.id, aiMessageId, toBackendMessages(session.messages, lastUserMsg.content));
     }
   };
 

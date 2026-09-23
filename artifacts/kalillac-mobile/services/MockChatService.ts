@@ -1,7 +1,4 @@
-export interface ChatTransport {
-  streamResponse(onChunk: (text: string, isDone: boolean) => void, task?: string): Promise<void>;
-  stop(): void;
-}
+import type { ChatTransport } from './chatTransport';
 
 // Static fixtures, not AI output. No prompts, attachments or network requests.
 const fixtures: Record<string, string> = {
@@ -17,7 +14,10 @@ export class MockChatService implements ChatTransport {
   private interval: ReturnType<typeof setInterval> | null = null;
   private resolvePending: (() => void) | null = null;
 
-  streamResponse(onChunk: (text: string, isDone: boolean) => void, task = 'Auto'): Promise<void> {
+  streamResponse(
+    onChunk: (text: string, isDone: boolean) => void,
+    task = 'Auto',
+  ): Promise<void> {
     this.stop();
     const answer = fixtures[task === 'Search' ? 'Research' : task] ?? fixtures.Auto;
     let length = 0;

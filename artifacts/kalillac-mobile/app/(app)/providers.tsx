@@ -23,8 +23,15 @@ export default function ProvidersScreen() {
         </View>
         <ThemedText variant="h1" style={styles.title}>AI Providers</ThemedText>
         <ThemedText variant="body" color="secondary" style={styles.subtitle}>
-          Milestone 1B preview: No AI or search provider is connected. All answers are simulated. 
+          Development connection: OpenRouter is reached through the Kalillac backend. All four modes currently use the configured development model.
         </ThemedText>
+
+        <ProviderCard
+          name="OpenRouter"
+          role="Auto, Fast, Smart & Deep"
+          status="Development"
+          description="The backend keeps the provider credential server-side and sends the current conversation for a non-streaming answer. Mode selection is preserved for future routing; it does not select different models yet."
+        />
         
         <ProviderCard 
           name="Groq" 
