@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
-import { Spacing } from '@/constants/Theme';
 
 export function BrandLockup({ compact = false }: { compact?: boolean }) {
   return (
@@ -12,14 +11,14 @@ export function BrandLockup({ compact = false }: { compact?: boolean }) {
       style={[styles.row, compact && styles.compactRow]}
     >
       <ThemedText
-        variant={compact ? 'h2' : 'h1'}
+        variant={compact ? 'h2' : 'display'}
         weight="semiBold"
         style={styles.word}
       >
         Kalillac
       </ThemedText>
       <ThemedText
-        variant={compact ? 'h2' : 'h1'}
+        variant={compact ? 'h2' : 'display'}
         weight="bold"
         color="accent"
       >
@@ -33,7 +32,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: Spacing.xs,
+    gap: 4,
   },
   compactRow: {
     gap: 2,

@@ -39,9 +39,9 @@ export function Button({
   };
 
   const getBgColor = () => {
-    if (disabled && variant !== 'ghost') return colors.border;
+    if (disabled && variant !== 'ghost' && variant !== 'outline') return colors.border;
     switch (variant) {
-      case 'primary': return colors.text;
+      case 'primary': return colors.accent;
       case 'secondary': return colors.surfaceSecondary;
       case 'outline': return 'transparent';
       case 'danger': return colors.error;
@@ -52,15 +52,16 @@ export function Button({
   const getTextColor = () => {
     if (disabled && variant !== 'ghost') return colors.textTertiary;
     switch (variant) {
-      case 'primary': return colors.background;
+      case 'primary': return colors.textBubbleUser;
       case 'secondary': return colors.text;
       case 'outline': return colors.text;
-      case 'danger': return '#FFFFFF';
+      case 'danger': return colors.textBubbleUser;
       case 'ghost': return colors.textSecondary;
     }
   };
 
   const getBorderColor = () => {
+    if (disabled && variant === 'outline') return colors.border;
     if (variant === 'outline') return colors.border;
     return 'transparent';
   };
@@ -68,9 +69,9 @@ export function Button({
   const getHeight = () => {
     switch (size) {
       case 'sm': return 36;
-      case 'lg': return 56;
+      case 'lg': return 52;
       case 'md':
-      default: return 48;
+      default: return 44;
     }
   };
 
@@ -88,7 +89,7 @@ export function Button({
           borderColor: getBorderColor(),
           borderWidth: variant === 'outline' ? 1 : 0,
           height: getHeight(),
-          paddingHorizontal: size === 'sm' ? Spacing.md : Spacing.lg,
+          paddingHorizontal: size === 'sm' ? Spacing.md : Spacing.xl,
         },
         style,
       ]}
@@ -100,6 +101,7 @@ export function Button({
           {icon}
           <ThemedText
             variant="button"
+            weight="medium"
             style={{ color: getTextColor(), marginLeft: icon ? Spacing.sm : 0 }}
           >
             {title}

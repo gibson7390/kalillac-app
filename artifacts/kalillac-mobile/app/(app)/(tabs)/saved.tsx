@@ -12,9 +12,10 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
 import { router } from 'expo-router';
 import { Button } from '@/components/Button';
+import * as Haptics from 'expo-haptics';
 
 export default function SavedTab() {
-  const { colors } = usePreferences();
+  const { colors, hapticsEnabled } = usePreferences();
   const insets = useSafeAreaInsets();
   const {
     activeSessions,
@@ -26,6 +27,7 @@ export default function SavedTab() {
 
   const handleOpen = async (id: string) => {
     try {
+      if (hapticsEnabled) Haptics.selectionAsync();
       const activeId = await continueSavedSession(id);
       if (activeId) {
         router.push(`/chat/${activeId}`);
@@ -37,6 +39,7 @@ export default function SavedTab() {
   };
 
   const handleDelete = (savedSessionId: string) => {
+    if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const logicalConversationId = resolveLogicalConversationId(
       activeSessions,
       savedSessions,
@@ -59,12 +62,13 @@ export default function SavedTab() {
   };
 
   const handleStart = () => {
+    if (hapticsEnabled) Haptics.selectionAsync();
     const id = createSession();
     router.push(`/chat/${id}`);
   };
 
-  const renderItem = ({ item }: { item: ChatSession }) => (
-    <View style={[styles.item, { borderBottomColor: colors.border }]}>
+  const renderItem = ({ item, index }: { item: ChatSession, index: number }) => (
+    <View style={[styles.item, index !== savedSessions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={() => handleOpen(item.id)}
@@ -72,10 +76,13 @@ export default function SavedTab() {
         accessibilityLabel={`Open saved chat: ${item.title}`}
         style={styles.itemTouch}
       >
+        <View style={[styles.iconBox, { backgroundColor: colors.surfaceSecondary }]}>
+          <Ionicons name="bookmark-outline" size={16} color={colors.textSecondary} />
+        </View>
         <View style={styles.itemContent}>
           <ThemedText variant="body" weight="medium" numberOfLines={1}>{item.title}</ThemedText>
-          <ThemedText variant="caption" color="secondary" style={{ marginTop: 4 }}>
-            Snapshot • {new Date(item.updatedAt).toLocaleDateString()} • {item.messages.length} messages
+          <ThemedText variant="caption" color="secondary" style={{ marginTop: 2 }}>
+            Snapshot · {new Date(item.updatedAt).toLocaleDateString()} · {item.messages.length} messages
           </ThemedText>
         </View>
       </TouchableOpacity>
@@ -94,7 +101,7 @@ export default function SavedTab() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <ThemedText variant="h2">Saved Snapshots</ThemedText>
+        <ThemedText variant="h2" weight="semiBold">Saved Snapshots</ThemedText>
         <ThemedText variant="bodySm" color="secondary" style={{ marginTop: 4 }}>
           Memory-only state. Copies vanish on app reload. 
         </ThemedText>
@@ -104,16 +111,17 @@ export default function SavedTab() {
         data={savedSessions}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={[styles.listContent, savedSessions.length === 0 && { flex: 1 }]}
+        contentContainerStyle={[styles.listContent, { paddingHorizontal: Spacing.lg, paddingBottom: Math.max(insets.bottom + 20, 100) }, savedSessions.length === 0 && { flex: 1, paddingHorizontal: 0 }]}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="bookmark-outline" size={48} color={colors.textTertiary} />
-            <ThemedText variant="body" color="secondary" style={{ marginTop: Spacing.md, marginBottom: Spacing.xl }}>
+            <Ionicons name="bookmark-outline" size={48} color={colors.border} />
+            <ThemedText variant="body" color="secondary" align="center" style={{ marginTop: Spacing.md, marginBottom: Spacing.xl }}>
               You haven't saved any snapshots yet.
             </ThemedText>
             <Button title="Start a conversation" onPress={handleStart} variant="secondary" />
           </View>
         }
+        ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
       />
     </View>
   );
@@ -122,19 +130,29 @@ export default function SavedTab() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { padding: Spacing.lg, paddingBottom: Spacing.md },
-  listContent: { paddingBottom: 100 },
+  listContent: { },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.xs,
   },
   itemTouch: {
     flex: 1,
-    padding: Spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+  },
+  iconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
   },
   itemContent: { flex: 1, paddingRight: Spacing.md },
   deleteBtn: {
-    padding: Spacing.lg,
+    padding: Spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },

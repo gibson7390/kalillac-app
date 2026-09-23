@@ -24,12 +24,12 @@ export default function SettingsTab() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <ThemedText variant="h2" style={styles.header}>Settings</ThemedText>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom + 20, 100) }]}>
+        <ThemedText variant="h2" weight="semiBold" style={styles.header}>Settings</ThemedText>
 
         {__DEV__ && (
           <View style={styles.section}>
-            <TouchableOpacity style={[styles.row, { backgroundColor: colors.surfaceSecondary }]} onPress={() => router.push('/paywall')}>
+            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.firstRow, styles.lastRow, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]} onPress={() => router.push('/paywall')}>
               <View style={styles.rowIcon}><Ionicons name="star" size={20} color={colors.accent} /></View>
               <View style={{ flex: 1 }}>
                 <ThemedText variant="body" weight="medium">Kalillac Plus</ThemedText>
@@ -37,15 +37,15 @@ export default function SettingsTab() {
                   {status === 'plus' ? 'Active Subscription' : 'Upgrade for advanced models (Demo)'}
                 </ThemedText>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
           </View>
         )}
 
         <View style={styles.section}>
-          <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>PREFERENCES</ThemedText>
-          <View style={[styles.group, { backgroundColor: colors.surfaceSecondary }]}>
-            <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+          <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>PREFERENCES</ThemedText>
+          <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
               <ThemedText variant="body">Dark Mode</ThemedText>
               <Switch 
                 value={themeMode === 'dark'} 
@@ -63,7 +63,7 @@ export default function SettingsTab() {
                 accessibilityLabel="Haptics"
               />
             </View>
-            <View style={styles.row}>
+            <View style={[styles.row, styles.lastRow]}>
               <ThemedText variant="body">Reduce Motion</ThemedText>
               <Switch 
                 value={reduceMotion} 
@@ -76,17 +76,17 @@ export default function SettingsTab() {
         </View>
 
         <View style={styles.section}>
-          <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>PRIVACY & DATA</ThemedText>
-          <View style={[styles.group, { backgroundColor: colors.surfaceSecondary }]}>
-            <TouchableOpacity style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/privacy')}>
+          <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>PRIVACY & DATA</ThemedText>
+          <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/privacy')}>
               <ThemedText variant="body">Privacy Policy</ThemedText>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/providers')}>
+            <TouchableOpacity activeOpacity={0.7} style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/providers')}>
               <ThemedText variant="body">AI Providers</ThemedText>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.row} onPress={handleClearTemp}>
+            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.lastRow]} onPress={handleClearTemp}>
               <ThemedText variant="body" color="error">Clear Temporary Chats</ThemedText>
             </TouchableOpacity>
           </View>
@@ -94,9 +94,9 @@ export default function SettingsTab() {
 
         {__DEV__ && (
           <View style={styles.section}>
-            <ThemedText variant="caption" color="secondary" style={styles.sectionTitle}>DEVELOPER / DEMO</ThemedText>
-            <View style={[styles.group, { backgroundColor: colors.surfaceSecondary }]}>
-              <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+            <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>DEVELOPER / DEMO</ThemedText>
+            <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
                 <ThemedText variant="body">Simulate Offline Mode</ThemedText>
                 <Switch 
                   value={offlineMode} 
@@ -114,7 +114,7 @@ export default function SettingsTab() {
                   accessibilityLabel="Simulate API errors"
                 />
               </View>
-              <TouchableOpacity style={styles.row} onPress={() => {
+              <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.lastRow]} onPress={() => {
                 if (savedSessions.length === 0) {
                   Alert.alert('No Saved Chats', 'Create a saved chat first to test corruption.');
                   return;
@@ -134,16 +134,18 @@ export default function SettingsTab() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { padding: Spacing.lg, paddingBottom: 100 },
+  scroll: { padding: Spacing.lg },
   header: { marginBottom: Spacing.lg },
   section: { marginBottom: Spacing.xl },
-  sectionTitle: { marginBottom: Spacing.sm, marginLeft: Spacing.sm },
-  group: { borderRadius: Radii.lg, overflow: 'hidden' },
+  sectionTitle: { marginBottom: Spacing.sm, marginLeft: Spacing.sm, letterSpacing: 0.5 },
+  group: { borderRadius: Radii.lg, borderWidth: 1, overflow: 'hidden' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: Spacing.md,
   },
-  rowIcon: { width: 32, alignItems: 'center' },
+  firstRow: { borderTopLeftRadius: Radii.lg, borderTopRightRadius: Radii.lg },
+  lastRow: { borderBottomLeftRadius: Radii.lg, borderBottomRightRadius: Radii.lg },
+  rowIcon: { width: 32, alignItems: 'flex-start' },
 });

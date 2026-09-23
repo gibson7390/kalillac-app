@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, StyleSheet, FlatList, TextInput, TouchableOpacity, 
   Platform, ActivityIndicator, Alert, Share,
-  Image as RNImage, Linking, ScrollView
+  Linking, ScrollView
 } from 'react-native';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,7 +28,7 @@ import { MockChatService } from '@/services/MockChatService';
 
 export default function ChatScreen() {
   const { id, task } = useLocalSearchParams<{ id: string; task?: string }>();
-  const { colors, isDark, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
+  const { colors, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
   const insets = useSafeAreaInsets();
   
   const {
@@ -43,12 +43,13 @@ export default function ChatScreen() {
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeMode, setActiveMode] = useState<AIModelMode>(session?.mode || 'Auto');
-  const [showModes, setShowModes] = useState(false);
   const [attachments, setAttachments] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const chatServiceRef = useRef<MockChatService | null>(null);
   const activeMessageIdRef = useRef<string | null>(null);
   const cancelledMessageIdsRef = useRef<Set<string>>(new Set());
+  const inputRef = useRef<TextInput>(null);
 
   const cancelActiveRequest = useCallback((reason = 'cancelled') => {
     const activeMessageId = activeMessageIdRef.current;
@@ -148,7 +149,7 @@ export default function ChatScreen() {
 
   const handleSend = () => {
     if ((!input.trim() && attachments.length === 0) || isGenerating) return;
-    
+
     if (activeMode === 'Deep' || activeMode === 'Smart') {
        if (status !== 'plus' || !consumeAllowance(1)) {
           Alert.alert('Allowance Exhausted', 'Please upgrade or switch to Auto/Fast to continue.', [
@@ -163,11 +164,9 @@ export default function ChatScreen() {
     setInput('');
     const currentAttachments = [...attachments];
     setAttachments([]);
-    
-    // Add User message
+
     addMessage(session.id, { id: generateId(), role: 'user', content: userText, modeUsed: activeMode, attachments: currentAttachments });
     
-    // Setup AI Mock Streaming
     setIsGenerating(true);
     const aiMessageId = generateId();
     cancelledMessageIdsRef.current.delete(aiMessageId);
@@ -185,14 +184,20 @@ export default function ChatScreen() {
     beginRequest(session.id, userText, aiMessageId);
 
     runStream(session.id, aiMessageId);
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   const handleStop = () => {
+    if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     cancelActiveRequest();
   };
 
   const handleRetryMessage = (message: ChatMessage) => {
     if (isGenerating || !message.requestPrompt) return;
+    if (hapticsEnabled) Haptics.selectionAsync();
     setIsGenerating(true);
     cancelledMessageIdsRef.current.delete(message.id);
     activeMessageIdRef.current = message.id;
@@ -208,17 +213,15 @@ export default function ChatScreen() {
   };
 
   const handleRegenerate = () => {
+    if (hapticsEnabled) Haptics.selectionAsync();
     handleStop();
-    // Re-run the last user prompt
     const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user');
     if (lastUserMsg) {
-      // Remove all messages after the last user message
       const aiMsgsToDrop = session.messages.filter(m => m.role === 'ai' && session.messages.indexOf(m) > session.messages.indexOf(lastUserMsg));
       if (aiMsgsToDrop.length > 0) {
         deleteMessageAndAfter(session.id, aiMsgsToDrop[0].id);
       }
       
-      // Simulate generating again
       setIsGenerating(true);
       const aiMessageId = generateId();
       cancelledMessageIdsRef.current.delete(aiMessageId);
@@ -233,20 +236,21 @@ export default function ChatScreen() {
         requestPrompt: lastUserMsg.content,
         retryCount: 1,
       });
-       beginRequest(session.id, lastUserMsg.content, aiMessageId, true);
+      beginRequest(session.id, lastUserMsg.content, aiMessageId, true);
       
       runStream(session.id, aiMessageId);
     }
   };
 
   const handleEdit = (msgId: string, content: string) => {
+    if (hapticsEnabled) Haptics.selectionAsync();
     Alert.alert('Edit Message', 'Clear recent messages and resubmit this prompt?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Resubmit', onPress: () => {
         handleStop();
-        // Set input and delete from this msg
         setInput(content);
         deleteMessageAndAfter(session.id, msgId);
+        setTimeout(() => inputRef.current?.focus(), 100);
       }}
     ]);
   };
@@ -257,6 +261,7 @@ export default function ChatScreen() {
   };
 
   const handleShare = (text: string) => {
+    if (hapticsEnabled) Haptics.selectionAsync();
     Share.share({ message: text });
   };
 
@@ -279,11 +284,13 @@ export default function ChatScreen() {
   }
 
   const removeAttachment = (id: string) => {
+    if (hapticsEnabled) Haptics.selectionAsync();
     setAttachments(prev => prev.filter(a => a.id !== id));
   };
 
   const handleSave = async () => {
     if (saving || isGenerating) return;
+    if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const performSave = async () => {
       setSaving(true);
       try {
@@ -319,9 +326,9 @@ export default function ChatScreen() {
     if (isFailed && !isUser) {
       return (
         <View style={[styles.msgWrapper, styles.msgAi]}>
-          <View style={[styles.msgBubble, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error, padding: Spacing.md }]}>
+          <View style={[styles.msgBubble, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm }}>
-              <Ionicons name="warning-outline" size={20} color={colors.error} />
+              <Ionicons name="warning-outline" size={18} color={colors.error} />
               <ThemedText variant="body" weight="semiBold" style={{ marginLeft: 8, color: colors.error }}>
                 {requestStatus === 'offline' ? 'Offline' : requestStatus === 'cancelled' ? 'Response stopped' : 'Connection failed'}
               </ThemedText>
@@ -334,6 +341,7 @@ export default function ChatScreen() {
                   : 'The Kalillac mock server did not respond.'}
             </ThemedText>
             <TouchableOpacity
+              activeOpacity={0.7}
               onPress={() => handleRetryMessage(item)}
               style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, backgroundColor: colors.surfaceSecondary, borderRadius: Radii.full }}
               accessibilityRole="button"
@@ -346,55 +354,86 @@ export default function ChatScreen() {
       );
     }
 
-    
     const markdownRules = {
       image: () => <ThemedText variant="caption" color="error">[Remote Image Blocked]</ThemedText>,
       html_block: () => <></>,
       html_inline: () => <></>,
       fence: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
         const content = node.content || '';
-        const lines = content.split('\n');
         return (
-          <View key={node.key} style={{ backgroundColor: colors.surfaceSecondary, borderRadius: Radii.sm, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.sm }}>
-              <View>
-                {lines.map((line, i) => {
-                  const colored = line.split(/(\b(?:const|let|var|function|return|import|from|export|default|if|else|class)\b)/).map((segment, j) => {
-                    if (['const','let','var','function','return','import','from','export','default','if','else','class'].includes(segment)) {
-                        return <ThemedText key={j} variant="bodySm" style={{ color: '#C678DD', fontFamily: 'monospace' }}>{segment}</ThemedText>;
-                    }
-                    return <ThemedText key={j} variant="bodySm" style={{ color: colors.text, fontFamily: 'monospace' }}>{segment}</ThemedText>;
-                  });
-                  return <View key={i} style={{ flexDirection: 'row' }}>{colored}</View>;
-                })}
-              </View>
+          <View key={node.key} style={{ backgroundColor: isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary, borderRadius: Radii.md, marginVertical: Spacing.sm, overflow: 'hidden' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.md }}>
+              <ThemedText variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text, fontFamily: 'monospace', lineHeight: 22 }}>
+                {content}
+              </ThemedText>
             </ScrollView>
           </View>
         );
-      }
+      },
+      code_block: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
+        const content = node.content || '';
+        return (
+          <View key={node.key} style={{ backgroundColor: isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary, borderRadius: Radii.md, marginVertical: Spacing.sm, overflow: 'hidden' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.md }}>
+              <ThemedText variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text, fontFamily: 'monospace', lineHeight: 22 }}>
+                {content}
+              </ThemedText>
+            </ScrollView>
+          </View>
+        );
+      },
+      table: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
+        return (
+          <View key={node.key} style={{ width: '100%', marginVertical: Spacing.sm, borderColor: isUser ? 'rgba(255,255,255,0.3)' : colors.border, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radii.md, overflow: 'hidden' }}>
+             <ScrollView
+               horizontal
+               showsHorizontalScrollIndicator={false}
+               style={{ width: '100%' }}
+               contentContainerStyle={{ paddingRight: Spacing.sm }}
+             >
+               <View style={{ flexDirection: 'column', alignSelf: 'flex-start' }}>
+                 {children}
+               </View>
+             </ScrollView>
+          </View>
+        );
+      },
+      tr: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
+        return (
+          <View key={node.key} style={{ flexDirection: 'row', alignSelf: 'flex-start', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isUser ? 'rgba(255,255,255,0.3)' : colors.border }}>
+            {children}
+          </View>
+        );
+      },
+      th: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
+        return (
+          <View key={node.key} style={{ paddingVertical: 10, paddingHorizontal: Spacing.md, backgroundColor: isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary, minWidth: 112, justifyContent: 'center' }}>
+             <ThemedText weight="semiBold" variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text }}>{children}</ThemedText>
+          </View>
+        );
+      },
+      td: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
+        return (
+          <View key={node.key} style={{ paddingVertical: 10, paddingHorizontal: Spacing.md, minWidth: 112, justifyContent: 'center' }}>
+             <ThemedText variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text }}>{children}</ThemedText>
+          </View>
+        );
+      },
     };
 
     return (
       <View style={[styles.msgWrapper, isUser ? styles.msgUser : styles.msgAi]}>
-        {!isUser && (
-          <View style={[styles.aiAvatar, { backgroundColor: colors.surfaceSecondary }]}>
-            <RNImage
-              source={require('@/assets/brand/kalillac-mark.png')}
-              style={styles.aiMark}
-              resizeMode="contain"
-              accessibilityIgnoresInvertColors
-            />
-          </View>
-        )}
         <View style={[
           styles.msgBubble,
-          isUser ? { backgroundColor: colors.bubbleUser } : { backgroundColor: colors.bubbleAi, borderWidth: 1, borderColor: colors.bubbleAiBorder }
+          isUser
+            ? { backgroundColor: colors.bubbleUser, borderBottomRightRadius: 4 }
+            : styles.msgAiBubble
         ]}>
           {item.attachments && item.attachments.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: item.content ? 8 : 0 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: item.content ? 8 : 0 }}>
               {item.attachments.map(att => (
-                <View key={att.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : colors.surfaceSecondary, padding: 4, paddingHorizontal: 8, borderRadius: 4 }}>
-                  <Ionicons name="document-text" size={12} color={isUser ? colors.textBubbleUser : colors.textBubbleAi} />
+                <View key={att.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : colors.surfaceSecondary, padding: 4, paddingHorizontal: 8, borderRadius: Radii.sm }}>
+                  <Ionicons name="document-text" size={14} color={isUser ? colors.textBubbleUser : colors.textBubbleAi} />
                   <ThemedText variant="caption" style={{ color: isUser ? colors.textBubbleUser : colors.textBubbleAi, marginLeft: 4 }}>
                     {att.name}
                   </ThemedText>
@@ -407,15 +446,22 @@ export default function ChatScreen() {
               rules={markdownRules}
               style={{
                 body: { color: isUser ? colors.textBubbleUser : colors.textBubbleAi, fontSize: 16, fontFamily: 'Inter_400Regular', lineHeight: 24 },
-                paragraph: { marginBottom: 12 },
-                strong: { fontFamily: 'Inter_600SemiBold' },
-                em: { fontStyle: 'italic' },
-                code_inline: { backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : colors.surfaceSecondary, color: isUser ? colors.textBubbleUser : colors.text, borderRadius: 4, paddingHorizontal: 4, fontFamily: 'monospace' },
-                blockquote: { borderLeftWidth: 4, borderLeftColor: colors.border, paddingLeft: 12, opacity: 0.8 },
+                paragraph: { marginBottom: 8, marginTop: 0 },
+                strong: { fontFamily: 'Inter_600SemiBold', color: isUser ? colors.textBubbleUser : colors.textBubbleAi },
+                em: { fontStyle: 'italic', color: isUser ? colors.textBubbleUser : colors.textBubbleAi },
+                code_inline: { backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : colors.surfaceSecondary, color: isUser ? colors.textBubbleUser : colors.text, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, fontFamily: 'monospace', overflow: 'hidden' },
+                blockquote: { borderLeftWidth: 3, borderLeftColor: isUser ? 'rgba(255,255,255,0.3)' : colors.border, paddingLeft: 12, opacity: 0.9, marginVertical: 8 },
+                bullet_list: { marginBottom: 8 },
+                ordered_list: { marginBottom: 8 },
+                list_item: { marginBottom: 4 },
+                hr: { backgroundColor: isUser ? 'rgba(255,255,255,0.3)' : colors.border, height: StyleSheet.hairlineWidth, marginVertical: 12 },
+                link: { color: isUser ? colors.textBubbleUser : colors.accent, textDecorationLine: 'underline' },
+                heading1: { fontFamily: 'Inter_600SemiBold', fontSize: 24, marginVertical: 12, color: isUser ? colors.textBubbleUser : colors.textBubbleAi },
+                heading2: { fontFamily: 'Inter_600SemiBold', fontSize: 20, marginVertical: 10, color: isUser ? colors.textBubbleUser : colors.textBubbleAi },
+                heading3: { fontFamily: 'Inter_600SemiBold', fontSize: 18, marginVertical: 8, color: isUser ? colors.textBubbleUser : colors.textBubbleAi },
               }}
               onLinkPress={(url) => {
                   if (/^https:\/\//i.test(url)) {
-                    // Open mock citation sheet
                      Alert.alert('Example source', `Illustrative source, not live research:\n${url}\n\nOpening it contacts that website.`, [
                        { text: 'Cancel', style: 'cancel' },
                        { text: 'Open website', onPress: () => { Linking.openURL(url).catch(() => Alert.alert('Unavailable', 'The website could not be opened.')); } }
@@ -433,28 +479,31 @@ export default function ChatScreen() {
         {!isUser && !item.isStreaming && (
           <View style={styles.msgActions}>
             <TouchableOpacity 
+              activeOpacity={0.7}
               onPress={() => handleCopy(item.content)} 
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Copy message"
             >
-              <Ionicons name="copy-outline" size={16} color={colors.textTertiary} />
+              <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
             <TouchableOpacity 
+              activeOpacity={0.7}
               onPress={() => handleShare(item.content)} 
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Share message"
             >
-              <Ionicons name="share-outline" size={16} color={colors.textTertiary} />
+              <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
             <TouchableOpacity 
+              activeOpacity={0.7}
               onPress={handleRegenerate} 
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Regenerate response"
             >
-              <Ionicons name="refresh-outline" size={16} color={colors.textTertiary} />
+              <Ionicons name="refresh-outline" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         )}
@@ -462,6 +511,7 @@ export default function ChatScreen() {
         {isUser && !isGenerating && (
           <View style={[styles.msgActions, { alignSelf: 'flex-end', marginRight: 4 }]}>
             <TouchableOpacity 
+              activeOpacity={0.7}
               onPress={() => handleEdit(item.id, item.content)} 
               style={styles.actionBtn}
               accessibilityRole="button"
@@ -476,6 +526,7 @@ export default function ChatScreen() {
   };
 
   const handleEndChat = () => {
+    if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const message = hasSavedCopy
       ? 'Delete this conversation? Its saved copy will also be deleted. This cannot be undone.'
       : 'Delete this conversation? This cannot be undone.';
@@ -506,19 +557,28 @@ export default function ChatScreen() {
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: Spacing.md, alignItems: 'center' }}>
-              <TouchableOpacity onPress={handleSave} disabled={saving || isGenerating || session.messages.length === 0} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel={hasSavedCopy ? 'Update saved copy' : 'Save this chat'}>
-                {saving ? <ActivityIndicator /> : <Ionicons name={hasSavedCopy ? "save-outline" : "bookmark-outline"} size={24} color={colors.text} />}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={handleSave}
+                disabled={saving || isGenerating || session.messages.length === 0}
+                style={styles.headerBtn}
+                accessibilityRole="button"
+                accessibilityLabel={hasSavedCopy ? 'Update saved copy' : 'Save this chat'}
+                accessibilityState={{ disabled: saving || isGenerating || session.messages.length === 0 }}
+              >
+                {saving ? <ActivityIndicator size="small" /> : <Ionicons name={hasSavedCopy ? "save-outline" : "bookmark-outline"} size={22} color={colors.text} style={{ opacity: (isGenerating || session.messages.length === 0) ? 0.4 : 1 }} />}
               </TouchableOpacity>
               {session.isTemporary && (
                 <TouchableOpacity
+                  activeOpacity={0.7}
                   onPress={handleEndChat}
-                  style={styles.actionBtn}
+                  style={styles.headerBtn}
                   testID="delete-conversation-button"
                   accessibilityRole="button"
                   accessibilityLabel="Delete conversation"
                 >
-                  <Ionicons name="trash-outline" size={24} color={colors.error} />
+                  <Ionicons name="trash-outline" size={22} color={colors.textTertiary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -526,54 +586,68 @@ export default function ChatScreen() {
         }} 
       />
 
-      <ThemedText variant="caption" color="secondary" style={{ paddingHorizontal: Spacing.md, paddingVertical: 8 }}>
-        Temporary chat · {hasSavedCopy ? 'Saved copy updates only by choice' : 'Memory only'}
-      </ThemedText>
-      <FlatList
-        data={[...session.messages].reverse()}
-        keyExtractor={item => item.id}
-        renderItem={renderMessage}
-        inverted
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        ListEmptyComponent={<ThemedText variant="body" color="secondary" style={{ transform: [{ scaleY: -1 }], padding: Spacing.lg }}>Start a {task?.toLowerCase() || 'new'} conversation.</ThemedText>}
-      />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <ThemedText variant="caption" color="secondary" align="center" style={{ paddingHorizontal: Spacing.md, paddingVertical: 12 }}>
+          Temporary chat · {hasSavedCopy ? 'Saved copy updates only by choice' : 'Memory only'}
+        </ThemedText>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-        <View style={[styles.inputContainer, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom || Spacing.md }]}>
-          
+        <FlatList
+          data={[...session.messages].reverse()}
+          keyExtractor={item => item.id}
+          renderItem={renderMessage}
+          inverted
+          contentContainerStyle={session.messages.length === 0 ? styles.emptyListContent : styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          ListEmptyComponent={(
+            <View style={[styles.emptyState, { transform: [{ scaleY: -1 }] }]}>
+              <ThemedText variant="body" color="secondary" align="center">
+                Start a {task?.toLowerCase() || 'new'} conversation.
+              </ThemedText>
+            </View>
+          )}
+        />
+
+        <View style={[styles.inputContainer, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
           {/* Mode Selector */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeSelectorRow}>
             {['Auto', 'Fast', 'Smart', 'Deep'].map((mode) => (
               <TouchableOpacity 
                 key={mode} 
-                onPress={() => setActiveMode(mode as AIModelMode)}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (hapticsEnabled) Haptics.selectionAsync();
+                  setActiveMode(mode as AIModelMode);
+                }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: activeMode === mode }}
                 accessibilityLabel={`${mode} mode`}
                 style={[
                   styles.modeBtn, 
-                  activeMode === mode ? { backgroundColor: colors.text } : { backgroundColor: colors.surfaceSecondary }
+                  activeMode === mode ? { backgroundColor: colors.accent } : { backgroundColor: colors.surfaceSecondary }
                 ]}
               >
-                <ThemedText variant="bodySm" weight="medium" style={{ color: activeMode === mode ? colors.background : colors.textSecondary }}>
+                <ThemedText variant="bodySm" weight="medium" style={{ color: activeMode === mode ? colors.textBubbleUser : colors.textSecondary }}>
                   {mode}
                 </ThemedText>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          <View style={[styles.inputBox, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+          <View style={[styles.inputBox, { backgroundColor: colors.surface, borderColor: isInputFocused ? colors.accent : colors.border }]}>
             {attachments.length > 0 && (
-              <View style={styles.attachmentsPreview}>
+              <View style={[styles.attachmentsPreview, { borderBottomColor: colors.border }]}>
                 {attachments.map(att => (
-                  <View key={att.id} style={[styles.attachmentChip, { backgroundColor: colors.surface }]}>
+                  <View key={att.id} style={[styles.attachmentChip, { backgroundColor: colors.surfaceSecondary }]}>
                     <Ionicons name="document-text" size={16} color={colors.accent} />
-                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Preview demo attachment" onPress={() => Alert.alert('Demo attachment preview', `${att.name}\n${att.type.toUpperCase()} · 2.5 MB\nSample fixture only. No real file is read, parsed or stored.`)}>
+                    <TouchableOpacity activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Preview demo attachment" onPress={() => Alert.alert('Demo attachment preview', `${att.name}\n${att.type.toUpperCase()} · 2.5 MB\nSample fixture only. No real file is read, parsed or stored.`)}>
                       <ThemedText variant="caption" numberOfLines={1} style={{ maxWidth: 100, marginLeft: 4 }}>{att.name}</ThemedText>
                     </TouchableOpacity>
-                    <TouchableOpacity accessibilityLabel="Remove attachment" onPress={() => removeAttachment(att.id)} style={{ marginLeft: 4, padding: 12 }}>
+                    <TouchableOpacity activeOpacity={0.7} accessibilityLabel="Remove attachment" onPress={() => removeAttachment(att.id)} style={{ marginLeft: 4, padding: 8 }}>
                       <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
                     </TouchableOpacity>
                   </View>
@@ -584,26 +658,36 @@ export default function ChatScreen() {
             <View style={styles.inputRow}>
               {__DEV__ && (
                 <TouchableOpacity 
+                  activeOpacity={0.7}
                   style={styles.attachBtn} 
                   onPress={handleAttachMock}
                   accessibilityLabel="Attach file"
                 >
-                  <Ionicons name="add-circle-outline" size={24} color={colors.textSecondary} />
+                  <Ionicons name="add-outline" size={24} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
               
               <TextInput
-                style={[styles.input, { color: colors.text }]}
+                ref={inputRef}
+                style={[
+                  styles.input,
+                  { color: colors.text, paddingLeft: __DEV__ ? 0 : Spacing.md },
+                  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : undefined,
+                ]}
                 placeholder="Ask Kalillac..."
                 placeholderTextColor={colors.textTertiary}
                 value={input}
                 onChangeText={setInput}
                 multiline
                 maxLength={2000}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
+                selectionColor={colors.accent}
               />
               
               {isGenerating ? (
                 <TouchableOpacity 
+                  activeOpacity={0.7}
                   style={styles.sendBtn} 
                   onPress={handleStop}
                   accessibilityLabel="Stop generating"
@@ -612,12 +696,16 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity 
+                  activeOpacity={0.7}
                   style={styles.sendBtn} 
                   onPress={handleSend} 
                   disabled={!input.trim() && attachments.length === 0}
                   accessibilityLabel="Send message"
+                  accessibilityState={{ disabled: !input.trim() && attachments.length === 0 }}
                 >
-                  <Ionicons name="arrow-up-circle" size={28} color={(input.trim() || attachments.length > 0) ? colors.accent : colors.textTertiary} />
+                  <View style={[styles.sendIconWrapper, { backgroundColor: (input.trim() || attachments.length > 0) ? colors.accent : colors.surfaceSecondary }]}>
+                    <Ionicons name="arrow-up" size={18} color={(input.trim() || attachments.length > 0) ? colors.textBubbleUser : colors.textTertiary} />
+                  </View>
                 </TouchableOpacity>
               )}
             </View>
@@ -631,22 +719,25 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   listContent: { padding: Spacing.md, gap: Spacing.md },
-  msgWrapper: { marginBottom: Spacing.md, maxWidth: '85%' },
-  msgUser: { alignSelf: 'flex-end' },
-  msgAi: { alignSelf: 'flex-start', flexDirection: 'column' },
-  aiAvatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  aiMark: { width: 18, height: 18 },
-  msgBubble: { padding: Spacing.md, borderRadius: Radii.lg },
-  msgActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: 4, marginLeft: 4 },
+  emptyListContent: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: Spacing.md },
+  emptyState: { paddingBottom: Spacing.md },
+  msgWrapper: { marginBottom: Spacing.md },
+  msgUser: { alignSelf: 'flex-end', maxWidth: '88%' },
+  msgAi: { alignSelf: 'flex-start', maxWidth: '100%' },
+  msgBubble: { paddingHorizontal: Spacing.md, paddingVertical: 12, borderRadius: Radii.xl },
+  msgAiBubble: { paddingHorizontal: 0, paddingVertical: 4, borderRadius: 0, backgroundColor: 'transparent' },
+  msgActions: { flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: 4 },
   actionBtn: { padding: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  inputContainer: { padding: Spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  modeSelectorRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm },
+  headerBtn: { padding: Spacing.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  inputContainer: { padding: Spacing.md, paddingTop: Spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  modeSelectorRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
   modeBtn: { paddingHorizontal: Spacing.md, minHeight: 44, justifyContent: 'center', borderRadius: Radii.full },
-  inputBox: { borderRadius: Radii.xl, borderWidth: 1, padding: Spacing.xs },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
-  attachmentsPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, padding: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.1)' },
+  inputBox: { borderRadius: Radii.xl, borderWidth: 1 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 4 },
+  attachmentsPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, padding: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   attachmentChip: { flexDirection: 'row', alignItems: 'center', padding: 4, paddingHorizontal: 8, borderRadius: Radii.sm },
-  attachBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, minHeight: 40, maxHeight: 120, paddingTop: Spacing.sm, paddingBottom: Spacing.sm, fontSize: 16 },
-  sendBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  attachBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingBottom: 10 },
+  input: { flex: 1, minHeight: 44, maxHeight: 120, paddingTop: 12, paddingBottom: 12, fontSize: 16, lineHeight: 22 },
+  sendBtn: { padding: Spacing.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingBottom: 6 },
+  sendIconWrapper: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 });

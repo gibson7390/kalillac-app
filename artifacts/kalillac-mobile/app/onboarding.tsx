@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Button } from '@/components/Button';
-import { Spacing } from '@/constants/Theme';
+import { Spacing, Radii } from '@/constants/Theme';
 import { Redirect, router } from 'expo-router';
 import { BrandLockup } from '@/components/BrandLockup';
 
@@ -23,7 +23,7 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, Spacing.xl) }]}>
       <View style={styles.content}>
         <View style={styles.header}>
           <BrandLockup />
@@ -35,18 +35,18 @@ export default function OnboardingScreen() {
         <View style={styles.features}>
           <FeatureItem
             title="Temporary by Default"
-            description="Chats stay in app memory until you end or clear them. Nothing is saved unless you choose it."
-            icon="shield-outline"
+            description="Chats stay in memory until you end or clear them. Nothing is saved unless you choose it."
+            icon="shield-checkmark-outline"
           />
           <FeatureItem
             title="Explicit Snapshots"
             description="Saved copies are separate, memory-only snapshots and clear when the app reloads."
-            icon="server-outline"
+            icon="albums-outline"
           />
           <FeatureItem
             title="Calm & Focused"
             description="A premium interface designed without distractions for deep thinking."
-            icon="leaf-outline"
+            icon="sparkles-outline"
           />
         </View>
       </View>
@@ -70,12 +70,12 @@ function FeatureItem({ title, description, icon }: { title: string, description:
   const { colors } = usePreferences();
   return (
     <View style={styles.featureItem}>
-      <View style={[styles.iconContainer, { backgroundColor: colors.surfaceSecondary }]}>
-        <Ionicons name={icon} size={24} color={colors.text} />
+      <View style={[styles.iconContainer, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
+        <Ionicons name={icon} size={22} color={colors.accent} />
       </View>
       <View style={styles.featureText}>
-        <ThemedText variant="body" weight="semiBold">{title}</ThemedText>
-        <ThemedText variant="bodySm" color="secondary" style={{ marginTop: 2 }}>{description}</ThemedText>
+        <ThemedText variant="body" weight="medium">{title}</ThemedText>
+        <ThemedText variant="bodySm" color="secondary" style={{ marginTop: 4 }}>{description}</ThemedText>
       </View>
     </View>
   );
@@ -87,13 +87,14 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     justifyContent: 'center',
   },
   header: {
     marginBottom: Spacing.xxl,
   },
   subtitle: {
+    marginTop: Spacing.md,
     lineHeight: 24,
   },
   features: {
@@ -101,22 +102,22 @@ const styles = StyleSheet.create({
   },
   featureItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.md,
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
   },
   featureText: {
     flex: 1,
+    paddingTop: 2,
   },
   footer: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
     gap: Spacing.md,
   },
   disclaimer: {

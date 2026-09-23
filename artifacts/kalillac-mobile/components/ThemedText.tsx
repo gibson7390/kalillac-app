@@ -1,4 +1,4 @@
-import { Text, TextProps, StyleSheet } from 'react-native';
+import { Text, TextProps } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { Typography } from '@/constants/Theme';
 
@@ -35,7 +35,7 @@ export function ThemedText({
   const getFontFamily = () => {
     if (weight) return Typography.fontFamily[weight];
     switch (variant) {
-      case 'display': return Typography.fontFamily.bold;
+      case 'display': return Typography.fontFamily.semiBold;
       case 'h1': return Typography.fontFamily.semiBold;
       case 'h2': return Typography.fontFamily.medium;
       case 'button': return Typography.fontFamily.medium;
@@ -50,9 +50,22 @@ export function ThemedText({
       case 'accent': return colors.accent;
       case 'error': return colors.error;
       case 'success': return colors.success;
-      case 'inverse': return colors.surface; // Assuming light text on dark accents
+      case 'inverse': return colors.surface;
       case 'primary':
       default: return colors.text;
+    }
+  };
+
+  const getLineHeight = () => {
+    switch (variant) {
+      case 'display': return Typography.sizes.display * 1.2;
+      case 'h1': return Typography.sizes.xxl * 1.2;
+      case 'h2': return Typography.sizes.xl * 1.3;
+      case 'body': return Typography.sizes.base * 1.5;
+      case 'bodySm': return Typography.sizes.sm * 1.5;
+      case 'caption': return Typography.sizes.xs * 1.4;
+      case 'button': return Typography.sizes.base * 1.2;
+      default: return Typography.sizes.base * 1.5;
     }
   };
 
@@ -64,6 +77,7 @@ export function ThemedText({
           fontFamily: getFontFamily(),
           color: getTextColor(),
           textAlign: align,
+          lineHeight: getLineHeight(),
         },
         style,
       ]}
