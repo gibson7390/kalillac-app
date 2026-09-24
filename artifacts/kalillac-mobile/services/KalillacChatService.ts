@@ -3,6 +3,9 @@ import type {
   ChatTransport,
   ChatTransportMessage,
 } from './chatTransport';
+import { consumeKalillacStream, StreamProtocolError } from './streamProtocol';
+import { fetch as expoFetch } from 'expo/fetch';
+import type { StreamTimingSession } from './streamTiming';
 
 export class BackendChatError extends Error {
   constructor(
@@ -32,6 +35,9 @@ function createRequestId(): string {
 
 export class KalillacChatService implements ChatTransport {
   private controller: AbortController | null = null;
+  private requestGeneration = 0;
+
+  constructor(private readonly timing?: StreamTimingSession) {}
 
   async streamResponse(
     onChunk: (text: string, isDone: boolean) => void,
@@ -40,45 +46,60 @@ export class KalillacChatService implements ChatTransport {
     mode: ChatMode = 'Auto',
   ): Promise<void> {
     this.stop();
+    const requestGeneration = ++this.requestGeneration;
     this.controller = new AbortController();
     const requestId = createRequestId();
+    this.timing?.requestStarted(requestId);
 
     try {
-      const response = await fetch(`${resolveApiBaseUrl()}/api/chat`, {
+      const response = await expoFetch(`${resolveApiBaseUrl()}/api/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
           'X-Request-ID': requestId,
         },
         body: JSON.stringify({ messages, mode, request_id: requestId }),
         signal: this.controller.signal,
       });
 
-      let payload: any = null;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
-
       if (!response.ok) {
+        let payload: any = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
         throw new BackendChatError(
           payload?.error?.code || 'backend-request-failed',
           payload?.error?.message || 'The Kalillac backend could not answer.',
         );
       }
 
-      if (!payload || typeof payload.content !== 'string' || !payload.content.trim()) {
-        throw new BackendChatError(
-          'invalid-backend-response',
-          'The Kalillac backend returned an invalid response.',
-        );
-      }
-
-      onChunk(payload.content, true);
+      let content = '';
+      await consumeKalillacStream(response, event => {
+        if (requestGeneration !== this.requestGeneration) return;
+        if (event.type === 'delta') {
+          this.timing?.parsedDelta();
+          content += event.text;
+          onChunk(content, false);
+        } else {
+          if (!content.trim()) {
+            throw new BackendChatError(
+              'empty-backend-response',
+              'The Kalillac backend returned an empty response.',
+            );
+          }
+          onChunk(content, true);
+          this.timing?.completed();
+        }
+      });
     } catch (error) {
       if (error instanceof BackendChatError) throw error;
       if (error instanceof Error && error.name === 'AbortError') throw error;
+      if (error instanceof StreamProtocolError) {
+        throw new BackendChatError(error.code, error.message);
+      }
       throw new BackendChatError(
         'backend-unreachable',
         'The Kalillac backend could not be reached.',
@@ -89,6 +110,7 @@ export class KalillacChatService implements ChatTransport {
   }
 
   stop(): void {
+    this.requestGeneration += 1;
     this.controller?.abort();
     this.controller = null;
   }

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, StyleSheet, FlatList, TextInput, TouchableOpacity, 
   Platform, ActivityIndicator, Alert, Share,
-  Linking, ScrollView
+  Linking, ScrollView, useWindowDimensions
 } from 'react-native';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +26,7 @@ import { useSubscription } from '@/contexts/SubscriptionContext';
 
 import { BackendChatError, KalillacChatService } from '@/services/KalillacChatService';
 import type { ChatTransportMessage, ChatTransport } from '@/services/chatTransport';
+import { StreamTimingSession } from '@/services/streamTiming';
 
 function toBackendMessages(
   messages: ChatMessage[],
@@ -46,10 +47,26 @@ function toBackendMessages(
   return normalized.slice(-40);
 }
 
+function AssistantRenderCommitProbe({
+  timing,
+  content,
+  isStreaming,
+}: {
+  timing?: StreamTimingSession;
+  content: string;
+  isStreaming: boolean;
+}) {
+  useEffect(() => {
+    if (isStreaming && content.length > 0) timing?.assistantRenderCommitted();
+  }, [timing, content, isStreaming]);
+  return null;
+}
+
 export default function ChatScreen() {
   const { id, task } = useLocalSearchParams<{ id: string; task?: string }>();
   const { colors, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   
   const {
     getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
@@ -59,6 +76,7 @@ export default function ChatScreen() {
   const { status, consumeAllowance } = useSubscription();
   const session = getSession(id || '');
   const hasSavedCopy = session ? hasSavedSnapshotAssociation(session) : false;
+  const headerTitleMaxWidth = Math.max(96, Math.min(320, windowWidth - 184));
 
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -69,15 +87,21 @@ export default function ChatScreen() {
   const chatServiceRef = useRef<ChatTransport | null>(null);
   const activeMessageIdRef = useRef<string | null>(null);
   const cancelledMessageIdsRef = useRef<Set<string>>(new Set());
+  const streamGenerationRef = useRef(0);
+  const streamTimingsRef = useRef(new Map<string, StreamTimingSession>());
   const inputRef = useRef<TextInput>(null);
 
   const cancelActiveRequest = useCallback((reason = 'cancelled') => {
+    streamGenerationRef.current += 1;
+    chatServiceRef.current?.stop();
     const activeMessageId = activeMessageIdRef.current;
     const sessionId = id || '';
-    if (!activeMessageId || !sessionId) return;
+    if (!activeMessageId || !sessionId) {
+      setIsGenerating(false);
+      return;
+    }
 
     cancelledMessageIdsRef.current.add(activeMessageId);
-    chatServiceRef.current?.stop();
     updateMessage(sessionId, activeMessageId, cancelledRequestUpdates(reason));
     updateRequestState(sessionId, {
       status: 'cancelled',
@@ -140,12 +164,23 @@ export default function ChatScreen() {
       return;
     }
 
-    const service = new KalillacChatService();
+    const streamGeneration = ++streamGenerationRef.current;
+    const timing = __DEV__ ? new StreamTimingSession() : undefined;
+    if (timing) streamTimingsRef.current.set(aiMessageId, timing);
+    const service = new KalillacChatService(timing);
     chatServiceRef.current = service;
+    let latestContent = '';
+    const isCurrentStream = () => (
+      streamGenerationRef.current === streamGeneration
+      && activeMessageIdRef.current === aiMessageId
+      && !cancelledMessageIdsRef.current.has(aiMessageId)
+    );
 
     try {
       await service.streamResponse((chunk, isDone) => {
-        if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
+        if (!isCurrentStream()) return;
+        latestContent = chunk;
+        if (!isDone) timing?.screenStreamingUpdate();
         updateMessage(sessionId, aiMessageId, {
           content: chunk,
           isStreaming: !isDone,
@@ -158,9 +193,9 @@ export default function ChatScreen() {
         }
       }, task, backendMessages, activeMode);
     } catch (e) {
-      if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
+      if (!isCurrentStream()) return;
       updateMessage(sessionId, aiMessageId, {
-        content: '',
+        content: latestContent,
         isStreaming: false,
         requestStatus: 'api-failure',
         requestError: e instanceof BackendChatError ? e.code : 'backend-failure',
@@ -172,6 +207,10 @@ export default function ChatScreen() {
       });
       activeMessageIdRef.current = null;
       setIsGenerating(false);
+    } finally {
+      if (isCurrentStream()) {
+        chatServiceRef.current = null;
+      }
     }
   };
 
@@ -356,7 +395,7 @@ export default function ChatScreen() {
     const requestStatus = item.requestStatus;
     const isFailed = requestStatus === 'offline' || requestStatus === 'api-failure' || requestStatus === 'cancelled';
 
-    if (isFailed && !isUser) {
+    if (isFailed && !isUser && !item.content.trim()) {
       return (
         <View style={[styles.msgWrapper, styles.msgAi]}>
           <View style={[styles.msgBubble, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error }]}>
@@ -462,6 +501,13 @@ export default function ChatScreen() {
             ? { backgroundColor: colors.bubbleUser, borderBottomRightRadius: 4 }
             : styles.msgAiBubble
         ]}>
+          {!isUser && (
+            <AssistantRenderCommitProbe
+              timing={streamTimingsRef.current.get(item.id)}
+              content={item.content}
+              isStreaming={!!item.isStreaming}
+            />
+          )}
           {item.attachments && item.attachments.length > 0 && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: item.content ? 8 : 0 }}>
               {item.attachments.map(att => (
@@ -586,11 +632,27 @@ export default function ChatScreen() {
       <Stack.Screen 
         options={{
           headerShown: true,
-          title: session.title,
+          headerTitle: () => (
+            <View style={[styles.headerTitleContainer, { maxWidth: headerTitleMaxWidth }]}>
+              <ThemedText
+                testID="conversation-header-title"
+                variant="body"
+                weight="semiBold"
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                style={styles.headerTitleText}
+              >
+                {session.title}
+              </ThemedText>
+            </View>
+          ),
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
           headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View
+              testID="conversation-header-actions"
+              style={styles.headerActions}
+            >
               <TouchableOpacity
                 activeOpacity={0.7}
                 onPress={handleSave}
@@ -761,6 +823,9 @@ const styles = StyleSheet.create({
   msgAiBubble: { paddingHorizontal: 0, paddingVertical: 4, borderRadius: 0, backgroundColor: 'transparent' },
   msgActions: { flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: 4 },
   actionBtn: { padding: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerTitleContainer: { minWidth: 0, justifyContent: 'center' },
+  headerTitleText: { flexShrink: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', paddingRight: Spacing.xs },
   headerBtn: { padding: Spacing.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   inputContainer: { padding: Spacing.md, paddingTop: Spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
   modeSelectorRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from provider import ChatProvider, OpenRouterProvider, ProviderError
+from provider import (
+    ChatProvider,
+    OpenRouterProvider,
+    ProviderError,
+)
 
 
 ChatRole = Literal["user", "assistant"]
@@ -133,4 +139,96 @@ async def chat(
         content=result.content,
         request_id=request_id,
         model=result.model,
+    )
+
+
+def encode_stream_event(
+    event_type: str,
+    *,
+    request_id: str,
+    text: str | None = None,
+    model: str | None = None,
+    code: str | None = None,
+    message: str | None = None,
+) -> str:
+    payload: dict[str, str] = {"type": event_type, "request_id": request_id}
+    if text is not None:
+        payload["text"] = text
+    if model is not None:
+        payload["model"] = model
+    if code is not None:
+        payload["code"] = code
+    if message is not None:
+        payload["message"] = message
+    return f"event: {event_type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(
+    payload: ChatRequest,
+    provider: Annotated[ChatProvider, Depends(get_provider)],
+    x_request_id: Annotated[str | None, Header()] = None,
+) -> StreamingResponse:
+    request_id = payload.request_id or x_request_id or uuid.uuid4().hex
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            completed = False
+            async for event in provider.stream(
+                [message.model_dump() for message in payload.messages],
+                mode=payload.mode,
+                request_id=request_id,
+            ):
+                if event.kind == "delta":
+                    if event.text:
+                        yield encode_stream_event(
+                            "delta",
+                            request_id=request_id,
+                            text=event.text,
+                        )
+                elif event.kind == "complete":
+                    completed = True
+                    yield encode_stream_event(
+                        "complete",
+                        request_id=request_id,
+                        model=event.model,
+                    )
+                else:
+                    raise ProviderError(
+                        "provider-invalid-stream",
+                        "The AI provider returned an invalid stream.",
+                        status_code=502,
+                    )
+
+            if not completed:
+                raise ProviderError(
+                    "provider-stream-incomplete",
+                    "The AI provider stream ended unexpectedly.",
+                    status_code=502,
+                )
+        except asyncio.CancelledError:
+            raise
+        except ProviderError as exc:
+            yield encode_stream_event(
+                "error",
+                request_id=request_id,
+                code=exc.code,
+                message=exc.message,
+            )
+        except Exception:
+            yield encode_stream_event(
+                "error",
+                request_id=request_id,
+                code="stream-failed",
+                message="The Kalillac backend could not complete the response.",
+            )
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
