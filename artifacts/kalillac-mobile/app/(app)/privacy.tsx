@@ -31,7 +31,7 @@ export default function PrivacyScreen() {
         </Section>
 
         <Section title="Saved Chats">
-          Save creates a detached memory-only snapshot. It is not encrypted or durable and disappears on reload. Later messages do not update it unless you choose Update saved copy.
+          On iPhone, Save creates an encrypted snapshot stored on this device. The encryption key stays in device Keychain storage, separate from the encrypted record. Later messages do not update it unless you choose Update saved copy. Browser preview copies are memory-only and disappear on reload.
         </Section>
 
         <Section title="Providers">

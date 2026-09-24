@@ -71,6 +71,7 @@ export default function ChatScreen() {
   const {
     getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
     updateSavedSession, deleteLogicalConversation, registerRequestCancellation,
+    savedLoaded, savedLoadError,
     beginRequest, updateRequestState,
   } = useChatRepository();
   const { status, consumeAllowance } = useSubscription();
@@ -361,7 +362,7 @@ export default function ChatScreen() {
   };
 
   const handleSave = async () => {
-    if (saving || isGenerating) return;
+    if (saving || isGenerating || !savedLoaded || savedLoadError) return;
     if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const performSave = async () => {
       setSaving(true);
@@ -369,9 +370,11 @@ export default function ChatScreen() {
         if (apiErrorMode) throw new Error('Simulated save failure');
         if (hasSavedCopy && session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
         else await saveSession(session.id);
-        Alert.alert('Snapshot saved', 'The detached memory copy changes only when you choose Update saved copy.');
+        Alert.alert('Snapshot saved', Platform.OS === 'web'
+          ? 'Browser preview: this copy disappears on reload. It changes only when you choose Update saved copy.'
+          : 'Encrypted on this device. This copy changes only when you choose Update saved copy.');
       } catch {
-        Alert.alert('Could not save', 'The mock repository is unavailable. Turn off simulated errors and retry.');
+        Alert.alert('Could not save', 'This saved copy could not be encrypted or stored. Please try again.');
       } finally {
         setSaving(false);
       }
@@ -383,7 +386,7 @@ export default function ChatScreen() {
     }
 
     Alert.alert(hasSavedCopy ? 'Update saved copy' : 'Save this chat',
-      'Save on this iPhone is a memory-only demo here. Copies disappear on reload and are not encrypted. Attachments and their metadata are excluded.',
+      'Save an encrypted copy on this device. Later turns remain temporary until you choose Update saved copy. Attachments are excluded.',
       [{ text: 'Cancel', style: 'cancel' }, {
         text: hasSavedCopy ? 'Update saved copy' : 'Save on this iPhone',
         onPress: performSave,
@@ -609,11 +612,15 @@ export default function ChatScreen() {
     const message = hasSavedCopy
       ? 'Delete this conversation? Its saved copy will also be deleted. This cannot be undone.'
       : 'Delete this conversation? This cannot be undone.';
-    const confirmDelete = () => {
-      setInput('');
-      setAttachments([]);
-      deleteLogicalConversation(session.id);
-      router.replace('/(app)/(tabs)');
+    const confirmDelete = async () => {
+      try {
+        await deleteLogicalConversation(session.id);
+        setInput('');
+        setAttachments([]);
+        router.replace('/(app)/(tabs)');
+      } catch {
+        Alert.alert('Could not delete', 'The local saved record could not be removed. Please try again.');
+      }
     };
 
     if (Platform.OS === 'web') {
@@ -656,11 +663,11 @@ export default function ChatScreen() {
               <TouchableOpacity
                 activeOpacity={0.7}
                 onPress={handleSave}
-                disabled={saving || isGenerating || session.messages.length === 0}
+                disabled={saving || isGenerating || session.messages.length === 0 || !savedLoaded || savedLoadError}
                 style={styles.headerBtn}
                 accessibilityRole="button"
                 accessibilityLabel={hasSavedCopy ? 'Update saved copy' : 'Save this chat'}
-                accessibilityState={{ disabled: saving || isGenerating || session.messages.length === 0 }}
+                accessibilityState={{ disabled: saving || isGenerating || session.messages.length === 0 || !savedLoaded || savedLoadError }}
               >
                 {saving ? <ActivityIndicator size="small" /> : <Ionicons name={hasSavedCopy ? "save-outline" : "bookmark-outline"} size={22} color={colors.text} style={{ opacity: (isGenerating || session.messages.length === 0) ? 0.4 : 1 }} />}
               </TouchableOpacity>

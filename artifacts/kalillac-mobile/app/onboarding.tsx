@@ -40,7 +40,7 @@ export default function OnboardingScreen() {
           />
           <FeatureItem
             title="Explicit Snapshots"
-            description="Saved copies are separate, memory-only snapshots and clear when the app reloads."
+            description="On iPhone, chosen snapshots are encrypted on this device. Browser previews clear on reload."
             icon="albums-outline"
           />
           <FeatureItem
