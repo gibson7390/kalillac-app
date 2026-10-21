@@ -226,7 +226,11 @@ export default function ChatScreen() {
     regenerating = false,
   ) => {
     if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
-    updateMessage(sessionId, aiMessageId, { requestStatus: 'streaming', requestError: undefined });
+    updateMessage(sessionId, aiMessageId, {
+      requestStatus: 'streaming',
+      requestError: undefined,
+      sources: undefined,
+    });
     updateRequestState(sessionId, { status: 'streaming', messageId: aiMessageId });
     if (offlineMode) {
       if (regenerating) logAssistantDiagnostic('regenerate_failed', { assistantMessageId: aiMessageId, errorClass: 'OfflineError' });
@@ -298,7 +302,10 @@ export default function ChatScreen() {
           activeMessageIdRef.current = null;
           setIsGenerating(false);
         }
-      }, task, backendMessages, activeMode);
+      }, task, backendMessages, activeMode, sources => {
+        if (!isCurrentStream()) return;
+        updateMessage(sessionId, aiMessageId, { sources });
+      });
     } catch (e) {
       if (!isCurrentStream()) return;
       if (regenerating) logAssistantDiagnostic('regenerate_failed', {
@@ -533,6 +540,8 @@ export default function ChatScreen() {
     const isUser = item.role === 'user';
     const requestStatus = item.requestStatus;
     const isFailed = requestStatus === 'offline' || requestStatus === 'api-failure' || requestStatus === 'cancelled';
+    const currentSearchUnavailable = requestStatus === 'api-failure'
+      && item.requestError === 'current-information-unavailable';
     const messageKey = item.id;
     const previousMessageKey = messageKeysRef.current.get(item.id);
     const messageKeyChanged = previousMessageKey !== undefined && previousMessageKey !== messageKey;
@@ -553,7 +562,9 @@ export default function ChatScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm }}>
               <Ionicons name="warning-outline" size={18} color={colors.error} />
               <ThemedText variant="body" weight="semiBold" style={{ marginLeft: 8, color: colors.error }}>
-                {requestStatus === 'offline' ? 'Offline' : requestStatus === 'cancelled' ? 'Response stopped' : 'Connection failed'}
+                {requestStatus === 'offline' ? 'Offline'
+                  : requestStatus === 'cancelled' ? 'Response stopped'
+                    : currentSearchUnavailable ? 'Current info unavailable' : 'Connection failed'}
               </ThemedText>
             </View>
             <ThemedText variant="bodySm" color="secondary" style={{ marginBottom: Spacing.md }}>
@@ -561,6 +572,8 @@ export default function ChatScreen() {
                 ? 'You appear to be offline. Check your connection and try again.'
                 : requestStatus === 'cancelled'
                   ? 'Generation was stopped. Your prompt is preserved.'
+                  : currentSearchUnavailable
+                    ? 'Current web information is temporarily unavailable.'
                   : 'The Kalillac mock server did not respond.'}
             </ThemedText>
             <TouchableOpacity
@@ -729,6 +742,36 @@ export default function ChatScreen() {
             />
           )}
         </View>
+
+        {!isUser && item.sources && item.sources.length > 0 && (
+          <View style={styles.sourcesSection} testID={`message-sources-${item.id}`}>
+            <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sourcesHeading}>
+              Sources
+            </ThemedText>
+            {item.sources.map((source, index) => (
+              <TouchableOpacity
+                key={source.id}
+                activeOpacity={0.7}
+                style={styles.sourceRow}
+                accessibilityRole="link"
+                accessibilityLabel={`Open source ${index + 1}: ${source.title}, ${source.domain}`}
+                onPress={() => {
+                  if (!/^https?:\/\//i.test(source.url)) return;
+                  Linking.openURL(source.url).catch(() => {
+                    Alert.alert('Unavailable', 'The source website could not be opened.');
+                  });
+                }}
+              >
+                <ThemedText variant="bodySm" weight="medium" style={{ color: colors.accent }}>
+                  [{index + 1}] {source.title}
+                </ThemedText>
+                <ThemedText variant="caption" color="secondary" style={styles.sourceDomain}>
+                  {source.domain}
+                </ThemedText>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
         
         {!isUser && !item.isStreaming && (
           <View style={styles.msgActions}>
@@ -1022,6 +1065,10 @@ const styles = StyleSheet.create({
   msgBubble: { paddingHorizontal: Spacing.md, paddingVertical: 12, borderRadius: Radii.xl },
   msgAiBubble: { paddingHorizontal: 0, paddingVertical: 4, borderRadius: 0, backgroundColor: 'transparent' },
   msgActions: { flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: 4 },
+  sourcesSection: { marginTop: Spacing.sm, marginLeft: 4, maxWidth: '100%' },
+  sourcesHeading: { marginBottom: 4 },
+  sourceRow: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', paddingVertical: 4, paddingRight: Spacing.md },
+  sourceDomain: { marginTop: 1 },
   actionBtn: { padding: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitleContainer: { minWidth: 0, justifyContent: 'center' },
   headerTitleText: { flexShrink: 1 },

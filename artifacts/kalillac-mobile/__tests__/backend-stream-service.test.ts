@@ -89,6 +89,32 @@ describe('Kalillac backend streaming service', () => {
     expect(updates.join('')).not.toContain('not visible');
   });
 
+  it('delivers validated sources separately from progressive assistant text', async () => {
+    mockExpoFetch.mockResolvedValue(responseFromChunks([
+      'event: delta\ndata: {"type":"delta","request_id":"sources","text":"Grounded answer [1]."}\n\n',
+      'event: complete\ndata: {"type":"complete","request_id":"sources","sources":[{"id":"source-1","title":"Example","url":"https://example.org","domain":"example.org","snippet":"must not be exposed"}],"debug":{"provider":"tavily"}}\n\n',
+    ]));
+    const chunks: Array<[string, boolean]> = [];
+    const sources: unknown[] = [];
+    await new KalillacChatService().streamResponse(
+      (text, done) => chunks.push([text, done]),
+      'Auto',
+      [],
+      'Auto',
+      value => sources.push(value),
+    );
+
+    expect(chunks).toEqual([
+      ['Grounded answer [1].', false],
+      ['Grounded answer [1].', true],
+    ]);
+    expect(sources).toEqual([[
+      { id: 'source-1', title: 'Example', url: 'https://example.org', domain: 'example.org' },
+    ]]);
+    expect(JSON.stringify(chunks)).not.toContain('snippet');
+    expect(JSON.stringify(sources)).not.toContain('must not be exposed');
+  });
+
   it('starts repeated generations with a fresh cancellation signal, context, and first delta', async () => {
     const started = jest.fn();
     const service = new KalillacChatService(undefined, started);

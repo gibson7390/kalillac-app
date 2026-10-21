@@ -1,6 +1,8 @@
+import { parseChatSources, type ChatSource } from './chatSources';
+
 export type KalillacStreamEvent =
   | { type: 'delta'; request_id: string; text: string }
-  | { type: 'complete'; request_id: string; model?: string }
+  | { type: 'complete'; request_id: string; model?: string; sources?: ChatSource[] }
   | { type: 'error'; request_id: string; code: string; message: string };
 
 export class StreamProtocolError extends Error {
@@ -48,10 +50,12 @@ function parseEvent(eventName: string, rawData: string): KalillacStreamEvent {
   }
 
   if (eventName === 'complete') {
+    const sources = parseChatSources(candidate.sources);
     return {
       type: 'complete',
       request_id: candidate.request_id,
       ...(typeof candidate.model === 'string' ? { model: candidate.model } : {}),
+      ...(sources ? { sources } : {}),
     };
   }
 

@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator, Protocol, Sequence
 
 import httpx
 from response_text import CustomerTextNormalizer, normalize_customer_text
+from runtime_config import ai_timeout_seconds
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -113,7 +114,7 @@ class OpenRouterProvider:
                     json=payload,
                 )
             else:
-                async with httpx.AsyncClient(timeout=45.0) as client:
+                async with httpx.AsyncClient(timeout=ai_timeout_seconds()) as client:
                     response = await client.post(
                         OPENROUTER_URL,
                         headers=headers,
@@ -344,6 +345,6 @@ class OpenRouterProvider:
                 yield event
             return
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=ai_timeout_seconds()) as client:
             async for event in consume(client):
                 yield event

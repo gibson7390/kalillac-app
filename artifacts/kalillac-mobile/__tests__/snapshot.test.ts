@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import { createSnapshot } from '../utils/snapshot';
+import { snapshotForStorage } from '../services/savedChatStore.ts';
 
 describe('createSnapshot', () => {
   it('should strip attachments and mark as non-temporary', () => {
@@ -48,5 +49,35 @@ describe('createSnapshot', () => {
     const updated = createSnapshot(session, 'saved');
     expect(updated.messages[0].content).toBe('Edited later');
     expect(saved.messages[0].content).toBe('Hello');
+  });
+
+  it('keeps citation source metadata out of encrypted Saved transcript serialization', () => {
+    const session = {
+      id: 'temporary',
+      title: 'Research',
+      createdAt: 1,
+      updatedAt: 2,
+      mode: 'Auto' as const,
+      isTemporary: true,
+      messages: [{
+        id: 'answer',
+        role: 'ai' as const,
+        content: 'A sourced answer [1].',
+        sources: [{
+          id: 'source-1',
+          title: 'Example',
+          url: 'https://example.org/',
+          domain: 'example.org',
+        }],
+      }],
+    };
+    const activeSnapshot = createSnapshot(session, 'saved');
+    const encryptedSnapshot = snapshotForStorage(activeSnapshot);
+    expect(encryptedSnapshot.messages[0]).toEqual({
+      id: 'answer',
+      role: 'ai',
+      content: 'A sourced answer [1].',
+    });
+    expect(JSON.stringify(encryptedSnapshot)).not.toContain('example.org');
   });
 });

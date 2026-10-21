@@ -3,6 +3,7 @@ import type {
   ChatTransport,
   ChatTransportMessage,
 } from './chatTransport';
+import type { ChatSource } from './chatSources';
 import { consumeKalillacStream, StreamProtocolError } from './streamProtocol';
 import { fetch as expoFetch } from 'expo/fetch';
 import type { StreamTimingSession } from './streamTiming';
@@ -47,6 +48,7 @@ export class KalillacChatService implements ChatTransport {
     _task = 'Auto',
     messages: ChatTransportMessage[] = [],
     mode: ChatMode = 'Auto',
+    onSources?: (sources: ChatSource[]) => void,
   ): Promise<void> {
     this.stop();
     const requestGeneration = ++this.requestGeneration;
@@ -88,13 +90,14 @@ export class KalillacChatService implements ChatTransport {
           this.timing?.parsedDelta();
           content += event.text;
           onChunk(content, false);
-        } else {
+        } else if (event.type === 'complete') {
           if (!content.trim()) {
             throw new BackendChatError(
               'empty-backend-response',
               'The Kalillac backend returned an empty response.',
             );
           }
+          if (event.sources?.length) onSources?.(event.sources);
           onChunk(content, true);
           this.timing?.completed();
         }

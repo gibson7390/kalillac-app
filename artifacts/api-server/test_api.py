@@ -60,8 +60,9 @@ async def request(
 
 @pytest.fixture(autouse=True)
 def clear_provider() -> None:
-    if hasattr(app.state, "provider"):
-        del app.state.provider
+    for name in ("provider", "search_provider"):
+        if hasattr(app.state, name):
+            delattr(app.state, name)
 
 
 def test_health_is_non_sensitive() -> None:

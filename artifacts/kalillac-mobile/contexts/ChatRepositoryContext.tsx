@@ -6,6 +6,7 @@ import { savedChatStore } from '../services/savedChatAdapter';
 // shares this basename and exports only the platform store.
 import { snapshotForStorage } from '../services/savedChatStore.ts';
 import { persistThenCommitSnapshot } from '../services/savedSnapshotTransaction';
+import type { ChatSource } from '../services/chatSources';
 
 export type AIModelMode = 'Auto' | 'Fast' | 'Smart' | 'Deep';
 export type ChatRequestStatus =
@@ -46,6 +47,8 @@ export interface ChatMessage {
   requestPrompt?: string;
   requestError?: string;
   retryCount?: number;
+  /** Volatile citation links supplied by the backend; intentionally omitted from Saved snapshots. */
+  sources?: ChatSource[];
 }
 
 export interface ChatSession {

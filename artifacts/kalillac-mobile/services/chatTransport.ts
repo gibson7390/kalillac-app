@@ -1,3 +1,5 @@
+import type { ChatSource } from './chatSources';
+
 export type ChatMode = 'Auto' | 'Fast' | 'Smart' | 'Deep';
 
 export interface ChatTransportMessage {
@@ -11,6 +13,7 @@ export interface ChatTransport {
     task?: string,
     messages?: ChatTransportMessage[],
     mode?: ChatMode,
+    onSources?: (sources: ChatSource[]) => void,
   ): Promise<void>;
   stop(): void;
 }
