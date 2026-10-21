@@ -6,6 +6,9 @@ import {
 } from 'expo-crypto';
 import { SavedChatStore, type AuthenticatedCipher } from './savedChatStore.ts';
 import { Buffer } from 'buffer';
+import { nativeDiagnostics } from '../dev/nativeDiagnostics';
+
+if (__DEV__) nativeDiagnostics.configure(AsyncStorage);
 
 const cipher: AuthenticatedCipher = {
   async generateKey() {
@@ -34,4 +37,10 @@ const keyOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_O
 export const savedChatStore = new SavedChatStore(AsyncStorage, {
   getItem: name => SecureStore.getItemAsync(name, keyOptions),
   setItem: (name, value) => SecureStore.setItemAsync(name, value, keyOptions),
-}, cipher);
+}, cipher, event => {
+  if (__DEV__) {
+    // IDs and stage outcomes only. Never log snapshots, cipher text, or keys.
+    console.info('[Kalillac Saved]', event);
+    return nativeDiagnostics.record('saved', event, true);
+  }
+});

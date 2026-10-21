@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol, Sequence
 
 import httpx
+from response_text import CustomerTextNormalizer, normalize_customer_text
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -15,7 +16,8 @@ KALILLAC_SYSTEM_INSTRUCTION = (
     "Use readable Markdown when useful. "
     "Do not claim persistent memory or knowledge of previous sessions. "
     "Do not tell users that temporary conversations will be remembered later. "
-    "Follow existing safety expectations without unnecessary lecturing."
+    "Follow existing safety expectations without unnecessary lecturing. "
+    "Do not include internal safety classifications or reasoning metadata in the customer-facing answer."
 )
 
 
@@ -31,6 +33,7 @@ class ProviderError(Exception):
 class ProviderResult:
     content: str
     model: str | None
+    safety_metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,7 @@ class ProviderStreamEvent:
     kind: str
     text: str = ""
     model: str | None = None
+    safety_metadata: dict[str, str] = field(default_factory=dict)
 
 
 class ChatProvider(Protocol):
@@ -171,9 +175,13 @@ class OpenRouterProvider:
                 status_code=502,
             )
 
+        visible, safety_metadata = normalize_customer_text(content)
+        if not visible.strip():
+            raise ProviderError("provider-empty-response", "The AI provider returned an empty response.")
         return ProviderResult(
-            content=content.strip(),
+            content=visible.strip(),
             model=returned_model if isinstance(returned_model, str) else None,
+            safety_metadata=safety_metadata,
         )
 
     async def _stream_response(
@@ -207,6 +215,7 @@ class OpenRouterProvider:
 
         returned_model: str | None = None
         completed = False
+        normalizer = CustomerTextNormalizer()
         try:
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
@@ -244,7 +253,9 @@ class OpenRouterProvider:
                         status_code=502,
                     )
                 if content:
-                    yield ProviderStreamEvent("delta", text=content, model=returned_model)
+                    visible = normalizer.feed(content)
+                    if visible:
+                        yield ProviderStreamEvent("delta", text=visible, model=returned_model)
         except ProviderError:
             raise
         except httpx.TimeoutException as exc:
@@ -267,7 +278,10 @@ class OpenRouterProvider:
                 status_code=502,
             )
 
-        yield ProviderStreamEvent("complete", model=returned_model)
+        remaining = normalizer.finish()
+        if remaining:
+            yield ProviderStreamEvent("delta", text=remaining, model=returned_model)
+        yield ProviderStreamEvent("complete", model=returned_model, safety_metadata=normalizer.safety_metadata)
 
     async def stream(
         self,

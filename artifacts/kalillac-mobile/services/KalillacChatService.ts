@@ -37,7 +37,10 @@ export class KalillacChatService implements ChatTransport {
   private controller: AbortController | null = null;
   private requestGeneration = 0;
 
-  constructor(private readonly timing?: StreamTimingSession) {}
+  constructor(
+    private readonly timing?: StreamTimingSession,
+    private readonly onRequestStarted?: (requestId: string) => void,
+  ) {}
 
   async streamResponse(
     onChunk: (text: string, isDone: boolean) => void,
@@ -47,9 +50,11 @@ export class KalillacChatService implements ChatTransport {
   ): Promise<void> {
     this.stop();
     const requestGeneration = ++this.requestGeneration;
-    this.controller = new AbortController();
+    const controller = new AbortController();
+    this.controller = controller;
     const requestId = createRequestId();
     this.timing?.requestStarted(requestId);
+    this.onRequestStarted?.(requestId);
 
     try {
       const response = await expoFetch(`${resolveApiBaseUrl()}/api/chat/stream`, {
@@ -60,7 +65,7 @@ export class KalillacChatService implements ChatTransport {
           'X-Request-ID': requestId,
         },
         body: JSON.stringify({ messages, mode, request_id: requestId }),
-        signal: this.controller.signal,
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -105,7 +110,7 @@ export class KalillacChatService implements ChatTransport {
         'The Kalillac backend could not be reached.',
       );
     } finally {
-      this.controller = null;
+      if (this.controller === controller) this.controller = null;
     }
   }
 

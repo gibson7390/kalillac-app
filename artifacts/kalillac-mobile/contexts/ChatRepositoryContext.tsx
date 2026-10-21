@@ -2,6 +2,10 @@ import { createContext, useContext, useState, useRef, useEffect, ReactNode, useC
 import { generateId } from '../utils/uuid';
 import { createSnapshot } from '../utils/snapshot';
 import { savedChatStore } from '../services/savedChatAdapter';
+// Explicit extension selects shared helpers, not the .native/.web adapter that
+// shares this basename and exports only the platform store.
+import { snapshotForStorage } from '../services/savedChatStore.ts';
+import { persistThenCommitSnapshot } from '../services/savedSnapshotTransaction';
 
 export type AIModelMode = 'Auto' | 'Fast' | 'Smart' | 'Deep';
 export type ChatRequestStatus =
@@ -204,8 +208,8 @@ interface ChatRepositoryState {
   beginRequest: (sessionId: string, prompt: string, messageId: string, retry?: boolean) => void;
   updateRequestState: (sessionId: string, updates: Partial<ChatRequestState> & { status: ChatRequestStatus }) => void;
   deleteMessageAndAfter: (sessionId: string, messageId: string) => void;
-  saveSession: (sessionId: string) => Promise<string>;
-  updateSavedSession: (temporarySessionId: string, savedSessionId: string) => Promise<void>;
+  saveSession: (sessionId: string, operationId?: string) => Promise<string>;
+  updateSavedSession: (temporarySessionId: string, savedSessionId: string, operationId?: string) => Promise<void>;
   corruptRandomSession: () => void;
 }
 
@@ -219,6 +223,58 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const requestCancellationsRef = useRef(new Map<string, () => void>());
   const deletedSessionIdsRef = useRef(new Set<string>());
+  const savedCommitWaitersRef = useRef(new Map<string, Array<{
+    snapshot: ChatSession;
+    activeSessionId: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>>());
+
+  const commitSavedSnapshot = useCallback((snapshot: ChatSession, activeSessionId: string) => (
+    new Promise<void>((resolve, reject) => {
+      const waiters = savedCommitWaitersRef.current.get(snapshot.id) ?? [];
+      const waiter = {
+        snapshot,
+        activeSessionId,
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          const current = savedCommitWaitersRef.current.get(snapshot.id) ?? [];
+          const remaining = current.filter(item => item !== waiter);
+          if (remaining.length) savedCommitWaitersRef.current.set(snapshot.id, remaining);
+          else savedCommitWaitersRef.current.delete(snapshot.id);
+          reject(new Error('Saved snapshot could not be confirmed in the app state'));
+        }, 5000),
+      };
+      savedCommitWaitersRef.current.set(snapshot.id, [...waiters, waiter]);
+      setActiveSessions(prev => prev.map(active => active.id === activeSessionId
+        ? { ...active, savedCopyId: snapshot.id }
+        : active));
+      setSavedSessions(prev => prev.some(item => item.id === snapshot.id)
+        ? prev.map(item => item.id === snapshot.id ? snapshot : item)
+        : [snapshot, ...prev]);
+    })
+  ), []);
+
+  useEffect(() => {
+    for (const [snapshotId, waiters] of savedCommitWaitersRef.current) {
+      const saved = savedSessions.find(item => item.id === snapshotId && !item.corrupted);
+      if (!saved) continue;
+      const storedData = JSON.stringify(snapshotForStorage(saved));
+      const remaining = waiters.filter(waiter => {
+        const active = activeSessions.find(item => item.id === waiter.activeSessionId);
+        const committed = active?.savedCopyId === snapshotId
+          && storedData === JSON.stringify(snapshotForStorage(waiter.snapshot));
+        if (!committed) return true;
+        clearTimeout(waiter.timeout);
+        waiter.resolve();
+        return false;
+      });
+      if (remaining.length) savedCommitWaitersRef.current.set(snapshotId, remaining);
+      else savedCommitWaitersRef.current.delete(snapshotId);
+    }
+  }, [activeSessions, savedSessions]);
 
   useEffect(() => {
     let mounted = true;
@@ -391,7 +447,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const saveSession = useCallback(async (sessionId: string) => {
+  const saveSession = useCallback(async (sessionId: string, operationId = sessionId) => {
     if (!savedLoaded || savedLoadError) throw new Error('Saved chats are unavailable');
     const session = activeSessions.find(s => s.id === sessionId);
     if (!session) throw new Error('Session not found');
@@ -400,19 +456,23 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       ...createSnapshot(session, generateId()),
       sourceConversationId: session.sourceConversationId ?? session.id,
     };
-    await savedChatStore.save(snapshot);
-    if (deletedSessionIdsRef.current.has(sessionId)) {
-      await savedChatStore.remove(snapshot.id);
-      throw new Error('Conversation was deleted while saving');
-    }
-    setActiveSessions(prev => prev.map(active => active.id === sessionId
-      ? { ...active, savedCopyId: snapshot.id }
-      : active));
-    setSavedSessions(prev => [snapshot, ...prev]);
+    await persistThenCommitSnapshot(
+      () => savedChatStore.saveAndVerify(snapshot, true, operationId),
+      async () => {
+        if (deletedSessionIdsRef.current.has(sessionId)) {
+          throw new Error('Conversation was deleted while saving');
+        }
+        await commitSavedSnapshot(snapshot, sessionId);
+      },
+      (stage, status, errorClass) => savedChatStore.recordDiagnostic({
+        operation: 'save', stage, status, snapshotId: snapshot.id, operationId,
+        ...(errorClass ? { errorClass } : {}),
+      }),
+    );
     return snapshot.id;
-  }, [activeSessions, savedSessions, savedLoaded, savedLoadError]);
+  }, [activeSessions, savedSessions, savedLoaded, savedLoadError, commitSavedSnapshot]);
 
-  const updateSavedSession = useCallback(async (tempId: string, savedId: string) => {
+  const updateSavedSession = useCallback(async (tempId: string, savedId: string, operationId = tempId) => {
     if (!savedLoaded || savedLoadError) throw new Error('Saved chats are unavailable');
     const tempSession = activeSessions.find(s => s.id === tempId);
     if (!tempSession || tempSession.savedCopyId !== savedId || !savedSessions.some(s => s.id === savedId && !s.corrupted)) throw new Error('Snapshot unavailable');
@@ -422,13 +482,20 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
       savedId,
       savedSession.sourceConversationId ?? tempSession.sourceConversationId ?? tempSession.id,
     );
-    await savedChatStore.save(snapshot);
-    if (deletedSessionIdsRef.current.has(tempId)) {
-      await savedChatStore.remove(savedId);
-      throw new Error('Conversation was deleted while updating');
-    }
-    setSavedSessions(prev => prev.map(s => s.id === savedId ? snapshot : s));
-  }, [activeSessions, savedSessions, savedLoaded, savedLoadError]);
+    await persistThenCommitSnapshot(
+      () => savedChatStore.saveAndVerify(snapshot, false, operationId),
+      async () => {
+        if (deletedSessionIdsRef.current.has(tempId)) {
+          throw new Error('Conversation was deleted while updating');
+        }
+        await commitSavedSnapshot(snapshot, tempId);
+      },
+      (stage, status, errorClass) => savedChatStore.recordDiagnostic({
+        operation: 'save', stage, status, snapshotId: snapshot.id, operationId,
+        ...(errorClass ? { errorClass } : {}),
+      }),
+    );
+  }, [activeSessions, savedSessions, savedLoaded, savedLoadError, commitSavedSnapshot]);
 
   const corruptRandomSession = useCallback(() => {
     setSavedSessions((prev) => {

@@ -27,6 +27,18 @@ import { useSubscription } from '@/contexts/SubscriptionContext';
 import { BackendChatError, KalillacChatService } from '@/services/KalillacChatService';
 import type { ChatTransportMessage, ChatTransport } from '@/services/chatTransport';
 import { StreamTimingSession } from '@/services/streamTiming';
+import { MarkdownCodeBlock } from '@/components/MarkdownCodeBlock';
+import {
+  assistantRenderStats,
+  logAssistantDiagnostic,
+  type AssistantRenderState,
+} from '@/utils/assistantRenderDiagnostics';
+import { NATIVE_CANDIDATE_ID } from '@/dev/nativeCandidate';
+import { savedChatStore } from '@/services/savedChatAdapter';
+import { markdownForDisplayWithInfo } from '@/utils/streamingMarkdown';
+import { regenerationPlan, startRegeneration } from '@/utils/regeneration';
+import { nativeDiagnostics } from '@/dev/nativeDiagnostics';
+import { customerVisibleAssistantText } from '@/utils/customerVisibleText';
 
 function toBackendMessages(
   messages: ChatMessage[],
@@ -49,21 +61,71 @@ function toBackendMessages(
 
 function AssistantRenderCommitProbe({
   timing,
+  messageId,
+  messageKey,
   content,
-  isStreaming,
+  state,
+  deltaNumber,
+  renderedCodeBlockCount,
+  displayInfo,
 }: {
   timing?: StreamTimingSession;
+  messageId: string;
+  messageKey: string;
   content: string;
-  isStreaming: boolean;
+  state: AssistantRenderState;
+  deltaNumber: number;
+  renderedCodeBlockCount: { current: number };
+  displayInfo: ReturnType<typeof markdownForDisplayWithInfo>;
 }) {
+  const previousKey = useRef(messageKey);
+  const latestContent = useRef(content);
+  const latestState = useRef(state);
+  latestContent.current = content;
+  latestState.current = state;
+
   useEffect(() => {
-    if (isStreaming && content.length > 0) timing?.assistantRenderCommitted();
-  }, [timing, content, isStreaming]);
+    logAssistantDiagnostic('message-mounted', {
+      assistantMessageId: messageId,
+      messageKey,
+      state: latestState.current,
+      accumulatedChars: latestContent.current.length,
+    });
+    return () => logAssistantDiagnostic('message-unmounted', {
+      assistantMessageId: messageId,
+      messageKey,
+      state: latestState.current,
+      accumulatedChars: latestContent.current.length,
+    });
+  }, [messageId, messageKey]);
+
+  useEffect(() => {
+    logAssistantDiagnostic('message-key-observed', {
+      assistantMessageId: messageId,
+      messageKey,
+      messageKeyChanged: previousKey.current !== messageKey,
+    });
+    previousKey.current = messageKey;
+    const stats = assistantRenderStats(
+      content,
+      deltaNumber,
+      state,
+      renderedCodeBlockCount.current,
+      displayInfo,
+    );
+    logAssistantDiagnostic('message-render-committed', {
+      assistantMessageId: messageId,
+      messageKey,
+      ...stats,
+    });
+    if (state === 'streaming' && content.length > 0) timing?.assistantRenderCommitted();
+  }, [timing, messageId, messageKey, content, state, deltaNumber, renderedCodeBlockCount, displayInfo]);
+
   return null;
 }
 
 export default function ChatScreen() {
-  const { id, task } = useLocalSearchParams<{ id: string; task?: string }>();
+  const { id, task, fixture } = useLocalSearchParams<{ id: string; task?: string; fixture?: string }>();
   const { colors, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -90,7 +152,16 @@ export default function ChatScreen() {
   const cancelledMessageIdsRef = useRef<Set<string>>(new Set());
   const streamGenerationRef = useRef(0);
   const streamTimingsRef = useRef(new Map<string, StreamTimingSession>());
+  const assistantDeltaCountsRef = useRef(new Map<string, number>());
+  const assistantReceivedContentRef = useRef(new Map<string, string>());
+  const messageKeysRef = useRef(new Map<string, string>());
   const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (__DEV__ && Platform.OS === 'ios') {
+      logAssistantDiagnostic('candidate-loaded', { candidateId: NATIVE_CANDIDATE_ID });
+    }
+  }, [id]);
 
   const cancelActiveRequest = useCallback((reason = 'cancelled') => {
     streamGenerationRef.current += 1;
@@ -103,6 +174,12 @@ export default function ChatScreen() {
     }
 
     cancelledMessageIdsRef.current.add(activeMessageId);
+    const content = assistantReceivedContentRef.current.get(activeMessageId) ?? '';
+    const deltaNumber = assistantDeltaCountsRef.current.get(activeMessageId) ?? 0;
+    logAssistantDiagnostic('message-stopped', {
+      assistantMessageId: activeMessageId,
+      ...assistantRenderStats(content, deltaNumber, 'stopped'),
+    });
     updateMessage(sessionId, activeMessageId, cancelledRequestUpdates(reason));
     updateRequestState(sessionId, {
       status: 'cancelled',
@@ -146,11 +223,13 @@ export default function ChatScreen() {
     sessionId: string,
     aiMessageId: string,
     backendMessages: ChatTransportMessage[],
+    regenerating = false,
   ) => {
     if (cancelledMessageIdsRef.current.has(aiMessageId)) return;
     updateMessage(sessionId, aiMessageId, { requestStatus: 'streaming', requestError: undefined });
     updateRequestState(sessionId, { status: 'streaming', messageId: aiMessageId });
     if (offlineMode) {
+      if (regenerating) logAssistantDiagnostic('regenerate_failed', { assistantMessageId: aiMessageId, errorClass: 'OfflineError' });
       updateMessage(sessionId, aiMessageId, { content: '', isStreaming: false, requestStatus: 'offline', requestError: 'offline' });
       updateRequestState(sessionId, { status: 'offline', messageId: aiMessageId, error: 'offline' });
       activeMessageIdRef.current = null;
@@ -158,6 +237,7 @@ export default function ChatScreen() {
       return;
     }
     if (apiErrorMode) {
+      if (regenerating) logAssistantDiagnostic('regenerate_failed', { assistantMessageId: aiMessageId, errorClass: 'SimulatedBackendError' });
       updateMessage(sessionId, aiMessageId, { content: '', isStreaming: false, requestStatus: 'api-failure', requestError: 'api-failure' });
       updateRequestState(sessionId, { status: 'api-failure', messageId: aiMessageId, error: 'api-failure' });
       activeMessageIdRef.current = null;
@@ -168,9 +248,20 @@ export default function ChatScreen() {
     const streamGeneration = ++streamGenerationRef.current;
     const timing = __DEV__ ? new StreamTimingSession() : undefined;
     if (timing) streamTimingsRef.current.set(aiMessageId, timing);
-    const service = new KalillacChatService(timing);
+    const fixtures = __DEV__
+      ? require('@/dev/chatFixtures') as typeof import('@/dev/chatFixtures')
+      : undefined;
+    const localFixture = fixtures?.resolveChatFixture(fixture)
+      ?? fixtures?.fixtureForMessages(session.messages);
+    const service: ChatTransport = localFixture
+      ? new (require('@/dev/chatFixtures') as typeof import('@/dev/chatFixtures')).FixtureChatService(localFixture)
+      : new KalillacChatService(timing, requestId => {
+        if (regenerating) logAssistantDiagnostic('regenerate_backend_request_started', { assistantMessageId: aiMessageId, requestId });
+      });
     chatServiceRef.current = service;
     let latestContent = '';
+    let deltaNumber = 0;
+    if (regenerating) logAssistantDiagnostic('regenerate_transport_started', { assistantMessageId: aiMessageId });
     const isCurrentStream = () => (
       streamGenerationRef.current === streamGeneration
       && activeMessageIdRef.current === aiMessageId
@@ -180,7 +271,21 @@ export default function ChatScreen() {
     try {
       await service.streamResponse((chunk, isDone) => {
         if (!isCurrentStream()) return;
+        deltaNumber += 1;
+        if (regenerating && deltaNumber === 1) {
+          logAssistantDiagnostic('regenerate_first_delta', { assistantMessageId: aiMessageId });
+        }
+        assistantDeltaCountsRef.current.set(aiMessageId, deltaNumber);
+        const previousContent = latestContent;
         latestContent = chunk;
+        assistantReceivedContentRef.current.set(aiMessageId, chunk);
+        logAssistantDiagnostic('message-state-update-requested', {
+          assistantMessageId: aiMessageId,
+          accumulatedChars: chunk.length,
+          deltaNumber,
+          state: isDone ? 'finalized' : 'streaming',
+          ...(isDone ? { finalizationPreservedPrevious: chunk === previousContent } : {}),
+        });
         if (!isDone) timing?.screenStreamingUpdate();
         updateMessage(sessionId, aiMessageId, {
           content: chunk,
@@ -188,6 +293,7 @@ export default function ChatScreen() {
           requestStatus: isDone ? 'completed' : 'streaming',
         });
         if (isDone) {
+          if (regenerating) logAssistantDiagnostic('regenerate_completed', { assistantMessageId: aiMessageId });
           updateRequestState(sessionId, { status: 'completed', messageId: aiMessageId });
           activeMessageIdRef.current = null;
           setIsGenerating(false);
@@ -195,6 +301,14 @@ export default function ChatScreen() {
       }, task, backendMessages, activeMode);
     } catch (e) {
       if (!isCurrentStream()) return;
+      if (regenerating) logAssistantDiagnostic('regenerate_failed', {
+        assistantMessageId: aiMessageId, errorClass: e instanceof Error ? e.name : 'UnknownError',
+      });
+      logAssistantDiagnostic('message-stream-failed', {
+        assistantMessageId: aiMessageId,
+        ...assistantRenderStats(latestContent, deltaNumber, 'failed'),
+        errorClass: e instanceof Error ? e.name : 'UnknownError',
+      });
       updateMessage(sessionId, aiMessageId, {
         content: latestContent,
         isStreaming: false,
@@ -209,7 +323,7 @@ export default function ChatScreen() {
       activeMessageIdRef.current = null;
       setIsGenerating(false);
     } finally {
-      if (isCurrentStream()) {
+      if (chatServiceRef.current === service) {
         chatServiceRef.current = null;
       }
     }
@@ -269,50 +383,35 @@ export default function ChatScreen() {
   };
 
   const handleRetryMessage = (message: ChatMessage) => {
-    if (isGenerating || !message.requestPrompt) return;
-    if (hapticsEnabled) Haptics.selectionAsync();
-    setIsGenerating(true);
-    cancelledMessageIdsRef.current.delete(message.id);
-    activeMessageIdRef.current = message.id;
-    updateMessage(session.id, message.id, {
-      content: '',
-      isStreaming: true,
-      requestStatus: 'retrying',
-      requestError: undefined,
-      retryCount: (message.retryCount ?? 0) + 1,
-    });
-    beginRequest(session.id, message.requestPrompt, message.id, true);
-    runStream(session.id, message.id, toBackendMessages(session.messages, message.requestPrompt));
+    handleRegenerate(message);
   };
 
-  const handleRegenerate = () => {
-    if (hapticsEnabled) Haptics.selectionAsync();
-    handleStop();
-    const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user');
-    if (lastUserMsg) {
-      const aiMsgsToDrop = session.messages.filter(m => m.role === 'ai' && session.messages.indexOf(m) > session.messages.indexOf(lastUserMsg));
-      if (aiMsgsToDrop.length > 0) {
-        deleteMessageAndAfter(session.id, aiMsgsToDrop[0].id);
-      }
-      
-      setIsGenerating(true);
-      const aiMessageId = generateId();
-      cancelledMessageIdsRef.current.delete(aiMessageId);
-      activeMessageIdRef.current = aiMessageId;
-      addMessage(session.id, {
-        id: aiMessageId,
-        role: 'ai',
-        content: '',
-        isStreaming: true,
-        modeUsed: activeMode,
-        requestStatus: 'retrying',
-        requestPrompt: lastUserMsg.content,
-        retryCount: 1,
-      });
-      beginRequest(session.id, lastUserMsg.content, aiMessageId, true);
-      
-      runStream(session.id, aiMessageId, toBackendMessages(session.messages, lastUserMsg.content));
+  const handleRegenerate = (message: ChatMessage) => {
+    logAssistantDiagnostic('regenerate_pressed', { assistantMessageId: message.id });
+    if (activeMessageIdRef.current) return;
+    const plan = regenerationPlan(getSession(session.id)?.messages ?? session.messages, message.id);
+    if (!plan) {
+      logAssistantDiagnostic('regenerate_failed', { assistantMessageId: message.id, errorClass: 'MissingSourcePromptError' });
+      Alert.alert('Could not retry', 'The original prompt is unavailable. Please send it again.');
+      return;
     }
+    logAssistantDiagnostic('regenerate_target_resolved', {
+      assistantMessageId: message.id, sourceUserMessageId: plan.sourceUserMessageId,
+    });
+    if (hapticsEnabled) Haptics.selectionAsync();
+    startRegeneration(plan, {
+      cancelPrevious: () => cancelActiveRequest(),
+      resetCancellation: targetId => cancelledMessageIdsRef.current.delete(targetId),
+      activate: targetId => { activeMessageIdRef.current = targetId; setIsGenerating(true); },
+      replaceAssistant: (targetId, patch) => updateMessage(session.id, targetId, { ...patch, modeUsed: activeMode }),
+      beginRequest: (prompt, targetId) => beginRequest(session.id, prompt, targetId, true),
+      run: (targetId, context) => {
+        logAssistantDiagnostic('regenerate_request_started', {
+          assistantMessageId: targetId, cancellationCleared: !cancelledMessageIdsRef.current.has(targetId),
+        });
+        void runStream(session.id, targetId, context, true);
+      },
+    });
   };
 
   const handleEdit = (msgId: string, content: string) => {
@@ -364,16 +463,24 @@ export default function ChatScreen() {
   const handleSave = async () => {
     if (saving || isGenerating || !savedLoaded || savedLoadError) return;
     if (hapticsEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const operationId = session.id;
     const performSave = async () => {
       setSaving(true);
       try {
         if (apiErrorMode) throw new Error('Simulated save failure');
-        if (hasSavedCopy && session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId);
-        else await saveSession(session.id);
+        if (hasSavedCopy && session.savedCopyId) await updateSavedSession(session.id, session.savedCopyId, operationId);
+        else await saveSession(session.id, operationId);
         Alert.alert('Snapshot saved', Platform.OS === 'web'
           ? 'Browser preview: this copy disappears on reload. It changes only when you choose Update saved copy.'
           : 'Encrypted on this device. This copy changes only when you choose Update saved copy.');
-      } catch {
+      } catch (error) {
+        savedChatStore.recordDiagnostic({
+          operation: 'save',
+          stage: 'save_failed',
+          status: 'failure',
+          operationId,
+          errorClass: error instanceof Error ? error.name : 'UnknownError',
+        });
         Alert.alert('Could not save', 'This saved copy could not be encrypted or stored. Please try again.');
       } finally {
         setSaving(false);
@@ -381,6 +488,9 @@ export default function ChatScreen() {
     };
 
     if (Platform.OS === 'web') {
+      savedChatStore.recordDiagnostic({
+        operation: 'save', stage: 'save_confirmed', status: 'success', operationId,
+      });
       await performSave();
       return;
     }
@@ -389,14 +499,52 @@ export default function ChatScreen() {
       'Save an encrypted copy on this device. Later turns remain temporary until you choose Update saved copy. Attachments are excluded.',
       [{ text: 'Cancel', style: 'cancel' }, {
         text: hasSavedCopy ? 'Update saved copy' : 'Save on this iPhone',
-        onPress: performSave,
+        onPress: async () => {
+          await savedChatStore.recordDiagnostic({
+            operation: 'save', stage: 'save_confirmed', status: 'success', operationId,
+          });
+          await performSave();
+        },
       }]);
+  };
+
+  const captureNativeEvidence = async () => {
+    if (!__DEV__) return;
+    const current = getSession(session.id);
+    for (const message of current?.messages ?? []) {
+      if (message.role !== 'ai') continue;
+      const state: AssistantRenderState = message.isStreaming ? 'streaming'
+        : message.requestStatus === 'cancelled' ? 'stopped'
+          : message.requestStatus === 'api-failure' ? 'failed' : 'finalized';
+      logAssistantDiagnostic('repository-state-captured', {
+        assistantMessageId: message.id,
+        ...assistantRenderStats(message.content, assistantDeltaCountsRef.current.get(message.id) ?? 0, state),
+      });
+    }
+    try {
+      await Clipboard.setStringAsync(await nativeDiagnostics.export());
+      Alert.alert('Diagnostic trace copied', 'Only IDs, stages, counts, and layout measurements were copied. No chat text, ciphertext, or keys.');
+    } catch {
+      Alert.alert('Could not copy diagnostics', 'The content-free trace remains available in Settings. Please try copying again.');
+    }
   };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isUser = item.role === 'user';
     const requestStatus = item.requestStatus;
     const isFailed = requestStatus === 'offline' || requestStatus === 'api-failure' || requestStatus === 'cancelled';
+    const messageKey = item.id;
+    const previousMessageKey = messageKeysRef.current.get(item.id);
+    const messageKeyChanged = previousMessageKey !== undefined && previousMessageKey !== messageKey;
+    messageKeysRef.current.set(item.id, messageKey);
+    const renderState: AssistantRenderState = item.isStreaming
+      ? 'streaming'
+      : requestStatus === 'cancelled'
+        ? 'stopped'
+        : requestStatus === 'api-failure' || requestStatus === 'offline'
+          ? 'failed'
+          : 'finalized';
+    const displayInfo = markdownForDisplayWithInfo(isUser ? item.content : customerVisibleAssistantText(item.content));
 
     if (isFailed && !isUser && !item.content.trim()) {
       return (
@@ -429,32 +577,37 @@ export default function ChatScreen() {
       );
     }
 
+    const renderedCodeBlockCount = { current: 0 };
     const markdownRules = {
       image: () => <ThemedText variant="caption" color="error">[Remote Image Blocked]</ThemedText>,
       html_block: () => <></>,
       html_inline: () => <></>,
       fence: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
-        const content = node.content || '';
+        const codeBlockIndex = ++renderedCodeBlockCount.current;
         return (
-          <View key={node.key} style={{ backgroundColor: isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary, borderRadius: Radii.md, marginVertical: Spacing.sm, overflow: 'hidden' }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.md }}>
-              <ThemedText variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text, fontFamily: 'monospace', lineHeight: 22 }}>
-                {content}
-              </ThemedText>
-            </ScrollView>
-          </View>
+          <MarkdownCodeBlock
+            key={node.key}
+            content={node.content || ''}
+            backgroundColor={isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary}
+            color={isUser ? colors.textBubbleUser : colors.text}
+            messageId={item.id}
+            codeBlockKey={String(node.key)}
+            codeBlockIndex={codeBlockIndex}
+          />
         );
       },
       code_block: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
-        const content = node.content || '';
+        const codeBlockIndex = ++renderedCodeBlockCount.current;
         return (
-          <View key={node.key} style={{ backgroundColor: isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary, borderRadius: Radii.md, marginVertical: Spacing.sm, overflow: 'hidden' }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: Spacing.md }}>
-              <ThemedText variant="bodySm" style={{ color: isUser ? colors.textBubbleUser : colors.text, fontFamily: 'monospace', lineHeight: 22 }}>
-                {content}
-              </ThemedText>
-            </ScrollView>
-          </View>
+          <MarkdownCodeBlock
+            key={node.key}
+            content={node.content || ''}
+            backgroundColor={isUser ? 'rgba(255,255,255,0.15)' : colors.surfaceSecondary}
+            color={isUser ? colors.textBubbleUser : colors.text}
+            messageId={item.id}
+            codeBlockKey={String(node.key)}
+            codeBlockIndex={codeBlockIndex}
+          />
         );
       },
       table: (node: ASTNode, children: React.ReactNode[], parent: ASTNode[], styles: any) => {
@@ -503,14 +656,19 @@ export default function ChatScreen() {
           isUser
             ? { backgroundColor: colors.bubbleUser, borderBottomRightRadius: 4 }
             : styles.msgAiBubble
-        ]}>
-          {!isUser && (
-            <AssistantRenderCommitProbe
-              timing={streamTimingsRef.current.get(item.id)}
-              content={item.content}
-              isStreaming={!!item.isStreaming}
-            />
-          )}
+        ]}
+          onLayout={event => {
+            if (isUser) return;
+            logAssistantDiagnostic('message-layout', {
+              assistantMessageId: item.id,
+              messageKey,
+              messageKeyChanged,
+              accumulatedChars: item.content.length,
+              height: Math.round(event.nativeEvent.layout.height),
+              width: Math.round(event.nativeEvent.layout.width),
+            });
+          }}
+        >
           {item.attachments && item.attachments.length > 0 && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: item.content ? 8 : 0 }}>
               {item.attachments.map(att => (
@@ -553,8 +711,22 @@ export default function ChatScreen() {
                   return false;
               }}
             >
-              {item.content + (item.isStreaming ? ' █' : '')}
+              {displayInfo.markdown
+                ? `${displayInfo.markdown}${item.isStreaming ? ' █' : ''}`
+                : ''}
             </Markdown>
+          )}
+          {!isUser && (
+            <AssistantRenderCommitProbe
+              timing={streamTimingsRef.current.get(item.id)}
+              messageId={item.id}
+              messageKey={messageKey}
+              content={item.content}
+              state={renderState}
+              deltaNumber={assistantDeltaCountsRef.current.get(item.id) ?? 0}
+              renderedCodeBlockCount={renderedCodeBlockCount}
+              displayInfo={displayInfo}
+            />
           )}
         </View>
         
@@ -562,7 +734,7 @@ export default function ChatScreen() {
           <View style={styles.msgActions}>
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={() => handleCopy(item.content)} 
+              onPress={() => handleCopy(customerVisibleAssistantText(item.content))}
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Copy message"
@@ -571,7 +743,7 @@ export default function ChatScreen() {
             </TouchableOpacity>
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={() => handleShare(item.content)} 
+              onPress={() => handleShare(customerVisibleAssistantText(item.content))}
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Share message"
@@ -580,10 +752,13 @@ export default function ChatScreen() {
             </TouchableOpacity>
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={handleRegenerate} 
+              onPress={() => handleRegenerate(item)}
+              onPressIn={() => logAssistantDiagnostic('regenerate_touch_started', { assistantMessageId: item.id })}
+              disabled={isGenerating}
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Regenerate response"
+              accessibilityState={{ disabled: isGenerating }}
             >
               <Ionicons name="refresh-outline" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -638,7 +813,6 @@ export default function ChatScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen 
         options={{
-          headerShown: true,
           headerTitle: () => (
             <View style={[styles.headerTitleContainer, { maxWidth: headerTitleMaxWidth }]}>
               <ThemedText
@@ -696,12 +870,31 @@ export default function ChatScreen() {
         <ThemedText variant="caption" color="secondary" align="center" style={{ paddingHorizontal: Spacing.md, paddingVertical: 12 }}>
           Temporary chat · {hasSavedCopy ? 'Saved copy updates only by choice' : 'Memory only'}
         </ThemedText>
+        {__DEV__ && Platform.OS === 'ios' && (
+          <View>
+          <ThemedText
+            testID="dev-ios-candidate-marker"
+            variant="caption"
+            color="secondary"
+            align="center"
+          >
+            iOS candidate: {NATIVE_CANDIDATE_ID}
+          </ThemedText>
+            <TouchableOpacity onPress={() => void captureNativeEvidence()} accessibilityRole="button"
+              accessibilityLabel="Capture and copy native diagnostics" style={{ padding: 8 }}>
+              <ThemedText variant="caption" align="center" color="secondary">Capture & copy native diagnostics</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <FlatList
+          testID="chat-message-list"
+          style={{ flex: 1 }}
           data={[...session.messages].reverse()}
           keyExtractor={item => item.id}
           renderItem={renderMessage}
           inverted
+          removeClippedSubviews={false}
           contentContainerStyle={session.messages.length === 0 ? styles.emptyListContent : styles.listContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
@@ -825,7 +1018,7 @@ const styles = StyleSheet.create({
   emptyState: { paddingBottom: Spacing.md },
   msgWrapper: { marginBottom: Spacing.md },
   msgUser: { alignSelf: 'flex-end', maxWidth: '88%' },
-  msgAi: { alignSelf: 'flex-start', maxWidth: '100%' },
+  msgAi: { alignSelf: 'flex-start', width: '100%', minWidth: 0 },
   msgBubble: { paddingHorizontal: Spacing.md, paddingVertical: 12, borderRadius: Radii.xl },
   msgAiBubble: { paddingHorizontal: 0, paddingVertical: 4, borderRadius: 0, backgroundColor: 'transparent' },
   msgActions: { flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: 4 },

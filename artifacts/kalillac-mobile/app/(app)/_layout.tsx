@@ -42,7 +42,13 @@ export default function AppLayout() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack screenOptions={{ headerShown: false, animation: reduceMotion ? 'none' : 'default' }}>
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="chat/[id]" options={{ animation: reduceMotion ? 'none' : 'slide_from_right' }} />
+        <Stack.Screen name="chat/[id]" options={{
+          headerShown: true,
+          title: 'Chat',
+          headerBackButtonDisplayMode: 'minimal',
+          headerBackTitle: 'Back',
+          animation: reduceMotion ? 'none' : 'slide_from_right',
+        }} />
         <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: reduceMotion ? 'none' : 'default' }} />
         <Stack.Screen name="privacy" options={{ presentation: 'modal', animation: reduceMotion ? 'none' : 'default' }} />
         <Stack.Screen name="providers" options={{ presentation: 'modal', animation: reduceMotion ? 'none' : 'default' }} />

@@ -75,6 +75,70 @@ describe('Kalillac backend streaming service', () => {
     expect(updates).toEqual([]);
   });
 
+  it('does not append safety/reasoning/debug metadata to assistant content', async () => {
+    mockExpoFetch.mockResolvedValue(
+      responseFromChunks([
+        'event: delta\ndata: {"type":"delta","request_id":"metadata-fixture","text":"Ordinary answer.","safety":"safe","reasoning":"not visible","debug":{"label":"User Safety: safe"}}\n\n',
+        'event: complete\ndata: {"type":"complete","request_id":"metadata-fixture","safety":"safe"}\n\n',
+      ]),
+    );
+    const updates: string[] = [];
+    await new KalillacChatService().streamResponse(text => updates.push(text));
+    expect(updates.at(-1)).toBe('Ordinary answer.');
+    expect(updates.join('')).not.toContain('User Safety');
+    expect(updates.join('')).not.toContain('not visible');
+  });
+
+  it('starts repeated generations with a fresh cancellation signal, context, and first delta', async () => {
+    const started = jest.fn();
+    const service = new KalillacChatService(undefined, started);
+    for (let iteration = 0; iteration < 3; iteration++) {
+      mockExpoFetch.mockResolvedValueOnce(responseFromChunks([
+        `event: delta\ndata: {"type":"delta","request_id":"r${iteration}","text":"answer ${iteration}"}\n\n`,
+        `event: complete\ndata: {"type":"complete","request_id":"r${iteration}"}\n\n`,
+      ]));
+      const updates: Array<[string, boolean]> = [];
+      const context = [{ role: 'user' as const, content: 'original prompt' }];
+      await service.streamResponse((text, done) => updates.push([text, done]), 'Auto', context);
+      const options = mockExpoFetch.mock.calls[iteration][1];
+      expect(options.signal.aborted).toBe(false);
+      expect(JSON.parse(options.body).messages).toEqual(context);
+      expect(updates).toEqual([[`answer ${iteration}`, false], [`answer ${iteration}`, true]]);
+      service.stop();
+    }
+    expect(started).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not let an older request finalizer clear the new request cancellation controller', async () => {
+    let resolveOld!: (response: Response) => void;
+    let resolveNew!: (response: Response) => void;
+    mockExpoFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveOld = resolve; }));
+    mockExpoFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveNew = resolve; }));
+    const service = new KalillacChatService();
+    const oldUpdates = jest.fn();
+    const newUpdates = jest.fn();
+    const old = service.streamResponse(oldUpdates);
+    const current = service.streamResponse(newUpdates);
+    const oldSignal = mockExpoFetch.mock.calls[0][1].signal;
+    const newSignal = mockExpoFetch.mock.calls[1][1].signal;
+    expect(oldSignal.aborted).toBe(true);
+    expect(newSignal.aborted).toBe(false);
+    resolveOld(responseFromChunks([
+      'event: delta\ndata: {"type":"delta","request_id":"old","text":"late old text"}\n\n',
+      'event: complete\ndata: {"type":"complete","request_id":"old"}\n\n',
+    ]));
+    await old;
+    service.stop();
+    expect(newSignal.aborted).toBe(true);
+    resolveNew(responseFromChunks([
+      'event: delta\ndata: {"type":"delta","request_id":"new","text":"cancelled text"}\n\n',
+      'event: complete\ndata: {"type":"complete","request_id":"new"}\n\n',
+    ]));
+    await current;
+    expect(oldUpdates).not.toHaveBeenCalled();
+    expect(newUpdates).not.toHaveBeenCalled();
+  });
+
   it('records content-free request, delta, screen, render, and completion timing', async () => {
     const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => undefined);
     mockExpoFetch.mockResolvedValue(

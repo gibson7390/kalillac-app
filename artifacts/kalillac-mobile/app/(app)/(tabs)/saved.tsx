@@ -132,7 +132,10 @@ export default function SavedTab() {
                   ? 'Loading saved chats…'
                   : "You haven't saved any snapshots yet."}
             </ThemedText>
-            <Button title="Start a conversation" onPress={handleStart} variant="secondary" />
+            <ThemedText variant="caption" color="secondary" align="center" style={{ marginBottom: Spacing.md }}>
+              Chats stay temporary until you choose Save.
+            </ThemedText>
+            <Button title="Start a temporary chat" onPress={handleStart} variant="secondary" />
           </View>
         }
         ItemSeparatorComponent={() => <View style={{ height: 0 }} />}

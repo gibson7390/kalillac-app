@@ -8,12 +8,22 @@ import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
 import { router } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
+import { nativeDiagnostics } from '@/dev/nativeDiagnostics';
 
 export default function SettingsTab() {
   const { colors, themeMode, setThemeMode, hapticsEnabled, setHapticsEnabled, reduceMotion, setReduceMotion, offlineMode, setOfflineMode, apiErrorMode, setApiErrorMode } = usePreferences();
   const { status } = useSubscription();
-  const { clearAllTemporary, corruptRandomSession, savedSessions } = useChatRepository();
+  const { clearAllTemporary, corruptRandomSession, savedSessions, createSession, addMessage } = useChatRepository();
   const insets = useSafeAreaInsets();
+
+  const startLocalFixture = (kind: 'short' | 'long-code' | 'mixed') => {
+    if (!__DEV__) return;
+    const fixtures = require('@/dev/chatFixtures') as typeof import('@/dev/chatFixtures');
+    const id = createSession();
+    fixtures.fixtureMessages(kind).forEach(message => addMessage(id, message));
+    router.push({ pathname: '/chat/[id]', params: { id, fixture: kind } });
+  };
 
   const handleClearTemp = () => {
     Alert.alert('Clear Temporary Chats', 'This will erase all active temporary sessions from memory.', [
@@ -123,6 +133,33 @@ export default function SettingsTab() {
                 Alert.alert('Simulated', 'The most recent saved chat state is randomly corrupted. Opening it will show an error.');
               }}>
                 <ThemedText variant="body" color="error">Simulate Saved Chat Corruption</ThemedText>
+              </TouchableOpacity>
+              {(['short', 'long-code', 'mixed'] as const).map(kind => (
+                <TouchableOpacity
+                  key={kind}
+                  style={styles.row}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open local ${kind} fixture`}
+                  onPress={() => startLocalFixture(kind)}
+                >
+                  <ThemedText variant="body">Local fixture: {kind} (no provider)</ThemedText>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity style={styles.row} accessibilityRole="button" onPress={async () => {
+                try {
+                  await Clipboard.setStringAsync(await nativeDiagnostics.export());
+                  Alert.alert('Diagnostic trace copied', 'Content-free trace only: IDs, stages, counts, and layout. No transcripts, ciphertext, or keys.');
+                } catch {
+                  Alert.alert('Could not copy diagnostics', 'Please try copying the content-free trace again.');
+                }
+              }}>
+                <ThemedText variant="body">Copy native diagnostics (no chat content)</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.row} accessibilityRole="button" onPress={async () => {
+                await nativeDiagnostics.clear();
+                Alert.alert('Diagnostics cleared', 'Only development diagnostics were cleared. Chats and saved copies were not changed.');
+              }}>
+                <ThemedText variant="body">Clear native diagnostics only</ThemedText>
               </TouchableOpacity>
             </View>
           </View>
