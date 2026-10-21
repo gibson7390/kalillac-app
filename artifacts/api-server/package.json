@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "python -m uvicorn fastapi_app:app --host 0.0.0.0 --port ${PORT:-8080}",
-    "build": "python -m compileall fastapi_app.py provider.py response_text.py runtime_config.py search_provider.py search_routing.py citation_validation.py",
+    "build": "python -m compileall fastapi_app.py provider.py response_text.py runtime_config.py search_provider.py search_routing.py citation_validation.py routing.py product_knowledge.py",
     "start": "python -m uvicorn fastapi_app:app --host 0.0.0.0 --port ${PORT:-8080}",
     "test": "python -m pytest -q"
   },

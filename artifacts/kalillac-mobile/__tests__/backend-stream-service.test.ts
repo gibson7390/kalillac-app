@@ -79,7 +79,7 @@ describe('Kalillac backend streaming service', () => {
     mockExpoFetch.mockResolvedValue(
       responseFromChunks([
         'event: delta\ndata: {"type":"delta","request_id":"metadata-fixture","text":"Ordinary answer.","safety":"safe","reasoning":"not visible","debug":{"label":"User Safety: safe"}}\n\n',
-        'event: complete\ndata: {"type":"complete","request_id":"metadata-fixture","safety":"safe"}\n\n',
+        'event: complete\ndata: {"type":"complete","request_id":"metadata-fixture","safety":"safe","runtime":{"effective_mode":"Fast","provider":"openrouter","returned_model":"vendor/model","reason_codes":["auto-simple"]}}\n\n',
       ]),
     );
     const updates: string[] = [];
@@ -87,6 +87,8 @@ describe('Kalillac backend streaming service', () => {
     expect(updates.at(-1)).toBe('Ordinary answer.');
     expect(updates.join('')).not.toContain('User Safety');
     expect(updates.join('')).not.toContain('not visible');
+    expect(updates.join('')).not.toContain('vendor/model');
+    expect(updates.join('')).not.toContain('auto-simple');
   });
 
   it('delivers validated sources separately from progressive assistant text', async () => {

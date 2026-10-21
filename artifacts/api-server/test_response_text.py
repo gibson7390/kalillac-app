@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from provider import OpenRouterProvider
+from routing import decide_routing
 from response_text import CustomerTextNormalizer, normalize_customer_text
 
 
@@ -62,7 +63,9 @@ def test_provider_complete_retains_safety_metadata_internally():
             })
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
             return await OpenRouterProvider(api_key="test-only", client=client).complete(
-                [{"role": "user", "content": "fixture"}], mode="Auto", request_id="fixture",
+                [{"role": "user", "content": "fixture"}],
+                decision=decide_routing("Auto", [{"role": "user", "content": "fixture"}]),
+                request_id="fixture",
             )
     result = asyncio.run(run())
     assert result.content == "Answer."
@@ -80,7 +83,9 @@ def test_provider_stream_normalizes_actual_content_not_only_metadata_fields():
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
             provider = OpenRouterProvider(api_key="test-only", client=client)
             return [event async for event in provider.stream(
-                [{"role": "user", "content": "fixture"}], mode="Auto", request_id="fixture",
+                [{"role": "user", "content": "fixture"}],
+                decision=decide_routing("Auto", [{"role": "user", "content": "fixture"}]),
+                request_id="fixture",
             )]
     events = asyncio.run(run())
     assert "".join(event.text for event in events if event.kind == "delta") == "The answer.\n"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from dataclasses import replace
 from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -15,8 +16,18 @@ from provider import (
     ChatProvider,
     OpenRouterProvider,
     ProviderError,
+    normalize_model_id,
 )
-from runtime_config import max_total_input_chars, max_user_input_chars
+from product_knowledge import ProductTopic, answer_product_question
+from routing import (
+    CapabilityClass,
+    RoutingDecision,
+    SearchPolicy,
+    TaskClass,
+    decide_routing,
+    runtime_response_metadata,
+)
+from runtime_config import max_context_messages, max_total_input_chars, max_user_input_chars
 from search_provider import (
     NormalizedSource,
     SEARCH_UNAVAILABLE_MESSAGE,
@@ -28,7 +39,7 @@ from search_routing import PreparedMessages, prepare_messages
 
 
 MAX_USER_INPUT_CHARS = max_user_input_chars()
-MAX_TOTAL_INPUT_CHARS = max_total_input_chars()
+MAX_CONTEXT_MESSAGES = max_context_messages()
 
 
 ChatRole = Literal["user", "assistant"]
@@ -52,7 +63,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    messages: list[ChatMessage] = Field(min_length=1, max_length=40)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_CONTEXT_MESSAGES)
     mode: ChatMode
     request_id: str | None = Field(default=None, max_length=128)
 
@@ -67,8 +78,12 @@ class ChatRequest(BaseModel):
     def validate_conversation(self) -> "ChatRequest":
         if self.messages[-1].role != "user":
             raise ValueError("the final message must be from the user")
+        routing = decide_routing(
+            self.mode,
+            [message.model_dump() for message in self.messages],
+        )
         total_chars = sum(len(message.content) for message in self.messages)
-        if total_chars > MAX_TOTAL_INPUT_CHARS:
+        if total_chars > min(routing.max_input_chars, max_total_input_chars()):
             raise ValueError("conversation is too large")
         return self
 
@@ -82,12 +97,31 @@ class SourceResponse(BaseModel):
     domain: str
 
 
+class RuntimeMetadataResponse(BaseModel):
+    request_id: str
+    requested_mode: ChatMode
+    effective_mode: ChatMode
+    task_class: TaskClass
+    capability_class: CapabilityClass
+    search_policy: SearchPolicy
+    search_used: bool
+    provider: str
+    configured_model: str | None = None
+    returned_model: str | None = None
+    model_identity: Literal["verified_returned", "configured_route_only", "unknown", "not_used"]
+    response_budget_class: str
+    intended_output_token_limit: int
+    max_input_chars: int
+    reason_codes: list[str]
+
+
 class ChatResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str
     request_id: str
     model: str | None = None
     sources: list[SourceResponse] | None = None
+    runtime: RuntimeMetadataResponse
 
 
 class ErrorResponse(BaseModel):
@@ -122,11 +156,13 @@ def get_search_provider(request: Request) -> SearchProvider:
 async def prepare_chat_messages(
     payload: ChatRequest,
     search_provider: SearchProvider,
+    decision: RoutingDecision | None = None,
 ) -> PreparedMessages:
     try:
         return await prepare_messages(
             [message.model_dump() for message in payload.messages],
             search_provider,
+            decision,
         )
     except SearchProviderError as exc:
         raise ProviderError(
@@ -182,13 +218,41 @@ async def chat(
     x_request_id: Annotated[str | None, Header()] = None,
 ) -> ChatResponse:
     request_id = payload.request_id or x_request_id or uuid.uuid4().hex
-    prepared = await prepare_chat_messages(payload, search_provider)
+    messages = [message.model_dump() for message in payload.messages]
+    decision = decide_routing(payload.mode, messages)
+    if decision.product_topic is not None and decision.product_topic is not ProductTopic.MODEL_PROVIDER:
+        return ChatResponse(
+            content=answer_product_question(
+                decision.product_topic,
+                configured_provider=decision.provider,
+                configured_model=decision.configured_model,
+            ),
+            request_id=request_id,
+            runtime=RuntimeMetadataResponse(**runtime_response_metadata(
+                decision,
+                request_id=request_id,
+                returned_model=None,
+                search_used=False,
+                local_response=True,
+            )),
+        )
+
+    prepared = await prepare_chat_messages(payload, search_provider, decision)
+    decision = replace(decision, search_used=bool(prepared.sources))
     result = await provider.complete(
         prepared.messages,
-        mode=payload.mode,
+        decision=decision,
         request_id=request_id,
     )
     content = result.content
+    returned_model = normalize_model_id(result.model)
+    if decision.product_topic is ProductTopic.MODEL_PROVIDER:
+        content = answer_product_question(
+            decision.product_topic,
+            configured_provider=decision.provider,
+            configured_model=decision.configured_model,
+            returned_model=returned_model,
+        )
     if prepared.sources:
         from citation_validation import validate_citations
 
@@ -196,8 +260,14 @@ async def chat(
     return ChatResponse(
         content=content,
         request_id=request_id,
-        model=result.model,
+        model=returned_model,
         sources=[SourceResponse(**source) for source in public_sources(prepared.sources)] or None,
+        runtime=RuntimeMetadataResponse(**runtime_response_metadata(
+            decision,
+            request_id=request_id,
+            returned_model=returned_model,
+            search_used=bool(prepared.sources),
+        )),
     )
 
 
@@ -210,6 +280,7 @@ def encode_stream_event(
     code: str | None = None,
     message: str | None = None,
     sources: list[dict[str, str]] | None = None,
+    runtime: dict[str, object] | None = None,
 ) -> str:
     payload: dict[str, object] = {"type": event_type, "request_id": request_id}
     if text is not None:
@@ -222,6 +293,8 @@ def encode_stream_event(
         payload["message"] = message
     if sources is not None:
         payload["sources"] = sources
+    if runtime is not None:
+        payload["runtime"] = runtime
     return f"event: {event_type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
@@ -236,7 +309,30 @@ async def chat_stream(
 
     async def events() -> AsyncIterator[str]:
         try:
-            prepared = await prepare_chat_messages(payload, search_provider)
+            messages = [message.model_dump() for message in payload.messages]
+            decision = decide_routing(payload.mode, messages)
+            if decision.product_topic is not None and decision.product_topic is not ProductTopic.MODEL_PROVIDER:
+                answer = answer_product_question(
+                    decision.product_topic,
+                    configured_provider=decision.provider,
+                    configured_model=decision.configured_model,
+                )
+                yield encode_stream_event("delta", request_id=request_id, text=answer)
+                yield encode_stream_event(
+                    "complete",
+                    request_id=request_id,
+                    runtime=runtime_response_metadata(
+                        decision,
+                        request_id=request_id,
+                        returned_model=None,
+                        search_used=False,
+                        local_response=True,
+                    ),
+                )
+                return
+
+            prepared = await prepare_chat_messages(payload, search_provider, decision)
+            decision = replace(decision, search_used=bool(prepared.sources))
             source_ids = {source.id for source in prepared.sources}
             citation_validator = None
             if source_ids:
@@ -246,10 +342,14 @@ async def chat_stream(
             completed = False
             async for event in provider.stream(
                 prepared.messages,
-                mode=payload.mode,
+                decision=decision,
                 request_id=request_id,
             ):
                 if event.kind == "delta":
+                    if decision.product_topic is ProductTopic.MODEL_PROVIDER:
+                        # Model self-identification is untrusted. Wait for returned
+                        # metadata, then emit an application-owned disclosure.
+                        continue
                     text = citation_validator.feed(event.text) if citation_validator else event.text
                     if text:
                         yield encode_stream_event(
@@ -258,6 +358,18 @@ async def chat_stream(
                             text=text,
                         )
                 elif event.kind == "complete":
+                    returned_model = normalize_model_id(event.model)
+                    if decision.product_topic is ProductTopic.MODEL_PROVIDER:
+                        yield encode_stream_event(
+                            "delta",
+                            request_id=request_id,
+                            text=answer_product_question(
+                                decision.product_topic,
+                                configured_provider=decision.provider,
+                                configured_model=decision.configured_model,
+                                returned_model=returned_model,
+                            ),
+                        )
                     if citation_validator:
                         remaining = citation_validator.finish()
                         if remaining:
@@ -270,8 +382,14 @@ async def chat_stream(
                     yield encode_stream_event(
                         "complete",
                         request_id=request_id,
-                        model=event.model,
+                        model=returned_model,
                         sources=public_sources(prepared.sources) or None,
+                        runtime=runtime_response_metadata(
+                            decision,
+                            request_id=request_id,
+                            returned_model=returned_model,
+                            search_used=bool(prepared.sources),
+                        ),
                     )
                 else:
                     raise ProviderError(

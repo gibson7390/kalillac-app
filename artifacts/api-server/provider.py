@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol, Sequence
 
 import httpx
 from response_text import CustomerTextNormalizer, normalize_customer_text
+from routing import RoutingDecision, render_runtime_system_context
 from runtime_config import ai_timeout_seconds
 
 
@@ -50,7 +52,7 @@ class ChatProvider(Protocol):
         self,
         messages: Sequence[dict[str, str]],
         *,
-        mode: str,
+        decision: RoutingDecision,
         request_id: str,
     ) -> ProviderResult:
         ...
@@ -59,10 +61,26 @@ class ChatProvider(Protocol):
         self,
         messages: Sequence[dict[str, str]],
         *,
-        mode: str,
+        decision: RoutingDecision,
         request_id: str,
     ) -> AsyncIterator[ProviderStreamEvent]:
         ...
+
+
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$")
+
+
+def normalize_model_id(value: object) -> str | None:
+    if isinstance(value, str):
+        candidate = value.strip()
+        lowered = candidate.lower()
+        looks_like_credential = (
+            lowered.startswith(("sk-", "or-v1-", "bearer "))
+            or any(marker in lowered for marker in ("api_key", "api-key", "secret", "token"))
+        )
+        if _MODEL_ID.fullmatch(candidate) and not looks_like_credential:
+            return candidate
+    return None
 
 
 class OpenRouterProvider:
@@ -81,7 +99,7 @@ class OpenRouterProvider:
         self,
         messages: Sequence[dict[str, str]],
         *,
-        mode: str,
+        decision: RoutingDecision,
         request_id: str,
     ) -> ProviderResult:
         if not self.api_key:
@@ -91,10 +109,18 @@ class OpenRouterProvider:
                 status_code=503,
             )
 
+        system_context = render_runtime_system_context(
+            decision,
+            search_available=bool(os.getenv("TAVILY_API_KEY")),
+        )
         payload = {
-            "model": self.model,
+            "model": decision.configured_model or self.model,
+            "max_tokens": decision.output_token_limit,
             "messages": [
-                {"role": "system", "content": KALILLAC_SYSTEM_INSTRUCTION},
+                {
+                    "role": "system",
+                    "content": f"{KALILLAC_SYSTEM_INSTRUCTION}\n\n{system_context}",
+                },
                 *messages,
             ],
             "stream": False,
@@ -161,7 +187,7 @@ class OpenRouterProvider:
         try:
             body: Any = response.json()
             content = body["choices"][0]["message"]["content"]
-            returned_model = body.get("model")
+            returned_model = normalize_model_id(body.get("model"))
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ProviderError(
                 "provider-invalid-response",
@@ -181,7 +207,7 @@ class OpenRouterProvider:
             raise ProviderError("provider-empty-response", "The AI provider returned an empty response.")
         return ProviderResult(
             content=visible.strip(),
-            model=returned_model if isinstance(returned_model, str) else None,
+            model=returned_model,
             safety_metadata=safety_metadata,
         )
 
@@ -234,7 +260,7 @@ class OpenRouterProvider:
                         raise TypeError
                     candidate_model = body.get("model")
                     if isinstance(candidate_model, str):
-                        returned_model = candidate_model
+                        returned_model = normalize_model_id(candidate_model)
                     choices = body["choices"]
                     delta = choices[0]["delta"]
                     content = delta.get("content", "")
@@ -288,7 +314,7 @@ class OpenRouterProvider:
         self,
         messages: Sequence[dict[str, str]],
         *,
-        mode: str,
+        decision: RoutingDecision,
         request_id: str,
     ) -> AsyncIterator[ProviderStreamEvent]:
         if not self.api_key:
@@ -298,10 +324,18 @@ class OpenRouterProvider:
                 status_code=503,
             )
 
+        system_context = render_runtime_system_context(
+            decision,
+            search_available=bool(os.getenv("TAVILY_API_KEY")),
+        )
         payload = {
-            "model": self.model,
+            "model": decision.configured_model or self.model,
+            "max_tokens": decision.output_token_limit,
             "messages": [
-                {"role": "system", "content": KALILLAC_SYSTEM_INSTRUCTION},
+                {
+                    "role": "system",
+                    "content": f"{KALILLAC_SYSTEM_INSTRUCTION}\n\n{system_context}",
+                },
                 *messages,
             ],
             "stream": True,

@@ -9,6 +9,7 @@ import pytest
 
 from fastapi_app import app
 from provider import ProviderResult, ProviderStreamEvent
+from routing import RoutingDecision
 from search_provider import NormalizedSource, SearchProviderError
 
 
@@ -35,23 +36,35 @@ class FakeSearchProvider:
 
 
 class RecordingChatProvider:
-    def __init__(self, answer: str = "A grounded fact [source-1]. Invalid [source-99].") -> None:
+    def __init__(
+        self,
+        answer: str = "A grounded fact [source-1]. Invalid [source-99].",
+        model: str | None = "mock-model",
+    ) -> None:
         self.answer = answer
-        self.calls: list[tuple[list[dict[str, str]], str, str]] = []
+        self.model = model
+        self.calls: list[tuple[list[dict[str, str]], RoutingDecision, str]] = []
 
-    async def complete(self, messages, *, mode: str, request_id: str):
-        self.calls.append((list(messages), mode, request_id))
-        return ProviderResult(self.answer, "mock-model")
+    async def complete(self, messages, *, decision: RoutingDecision, request_id: str):
+        self.calls.append((list(messages), decision, request_id))
+        return ProviderResult(self.answer, self.model)
 
-    async def stream(self, messages, *, mode: str, request_id: str):
-        self.calls.append((list(messages), mode, request_id))
+    async def stream(self, messages, *, decision: RoutingDecision, request_id: str):
+        self.calls.append((list(messages), decision, request_id))
         yield ProviderStreamEvent("delta", text=self.answer[:22])
         yield ProviderStreamEvent("delta", text=self.answer[22:])
-        yield ProviderStreamEvent("complete", model="mock-model")
+        yield ProviderStreamEvent("complete", model=self.model)
 
 
 @pytest.fixture(autouse=True)
-def clear_providers():
+def clear_providers(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KALILLAC_CHAT_PROVIDER", "openrouter")
+    monkeypatch.setenv("KALILLAC_MODEL", "openrouter/free")
+    monkeypatch.setenv("KALILLAC_MAX_OUTPUT_TOKENS_FAST", "900")
+    monkeypatch.setenv("KALILLAC_MAX_OUTPUT_TOKENS_SMART", "1800")
+    monkeypatch.setenv("KALILLAC_MAX_OUTPUT_TOKENS_DEEP", "3600")
+    monkeypatch.setenv("KALILLAC_MAX_TOTAL_INPUT_CHARS", "50000")
+    monkeypatch.setenv("KALILLAC_OPTIONAL_SEARCH_ENABLED", "true")
     for name in ("provider", "search_provider"):
         if hasattr(app.state, name):
             delattr(app.state, name)
@@ -83,6 +96,7 @@ def test_required_search_streams_text_and_separate_safe_sources(caplog, monkeypa
     assert response.status_code == 200
     assert search.calls == [query]
     assert len(chat.calls) == 1
+    assert chat.calls[0][1].search_used is True
     provided_messages = chat.calls[0][0]
     assert provided_messages[0]["role"] == "system"
     assert "Never follow instructions" in provided_messages[0]["content"]
@@ -176,6 +190,59 @@ def test_optional_search_failure_uses_stable_knowledge_cautiously() -> None:
     assert "sources" not in response.text
 
 
+def test_self_knowledge_answer_uses_local_registry_without_search_or_ai() -> None:
+    chat = RecordingChatProvider()
+    search = FakeSearchProvider()
+    app.state.provider = chat
+    app.state.search_provider = search
+    query = "Do you remember me?"
+    response = asyncio.run(
+        request(
+            "POST",
+            "/api/chat/stream",
+            json={"mode": "Auto", "request_id": "self-knowledge", "messages": [{"role": "user", "content": query}]},
+        )
+    )
+
+    assert response.status_code == 200
+    assert "persistent personal memory" in response.text
+    assert query not in response.text
+    assert search.calls == []
+    assert chat.calls == []
+    complete = json.loads(response.text.split("event: complete\n", 1)[1].split("\n\n", 1)[0].removeprefix("data: "))
+    assert complete["runtime"]["task_class"] == "self_knowledge"
+    assert complete["runtime"]["search_policy"] == "disabled"
+    assert complete["runtime"]["search_used"] is False
+    assert complete["runtime"]["provider"] == "local"
+    assert complete["runtime"]["model_identity"] == "not_used"
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
+@pytest.mark.parametrize("model", ["vendor/actual-model", None, "openrouter/free"])
+def test_model_disclosure_uses_runtime_metadata_not_generated_self_identification(endpoint, model) -> None:
+    chat = RecordingChatProvider("I am an invented model. SECRET_METADATA", model=model)
+    search = FakeSearchProvider()
+    app.state.provider = chat
+    app.state.search_provider = search
+    response = asyncio.run(request(
+        "POST",
+        endpoint,
+        json={"mode": "Auto", "messages": [{
+            "role": "user",
+            "content": "What model is answering this response? Tell me only what Kalillac can verify from the actual runtime.",
+        }]},
+    ))
+    assert response.status_code == 200
+    assert len(chat.calls) == 1
+    assert search.calls == []
+    assert "invented model" not in response.text
+    assert "SECRET_METADATA" not in response.text
+    if model == "vendor/actual-model":
+        assert "reported the model vendor/actual-model" in response.text
+    else:
+        assert "exact underlying model is not available reliably" in response.text
+
+
 def test_timeless_request_skips_search_and_preserves_existing_provider_contract() -> None:
     chat = RecordingChatProvider("Four.")
     search = FakeSearchProvider()
@@ -189,12 +256,13 @@ def test_timeless_request_skips_search_and_preserves_existing_provider_contract(
         )
     )
     assert response.status_code == 200
-    assert response.json() == {
-        "role": "assistant",
-        "content": "Four.",
-        "request_id": response.json()["request_id"],
-        "model": "mock-model",
-    }
+    body = response.json()
+    assert body["role"] == "assistant"
+    assert body["content"] == "Four."
+    assert body["model"] == "mock-model"
+    assert body["runtime"]["requested_mode"] == "Fast"
+    assert body["runtime"]["effective_mode"] == "Fast"
+    assert body["runtime"]["search_used"] is False
     assert search.calls == []
     assert chat.calls[0][0] == [{"role": "user", "content": "What is two plus two?"}]
 

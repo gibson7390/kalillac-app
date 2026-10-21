@@ -23,14 +23,14 @@ export default function ProvidersScreen() {
         </View>
         <ThemedText variant="h1" style={styles.title}>AI Providers</ThemedText>
         <ThemedText variant="body" color="secondary" style={styles.subtitle}>
-          Development connection: OpenRouter is reached through the Kalillac backend. All four modes currently use the configured development model.
+          OpenRouter is reached through the Kalillac backend. Modes apply different response and search policies, while capability classes currently use the same configured development route.
         </ThemedText>
 
         <ProviderCard
           name="OpenRouter"
           role="Auto, Fast, Smart & Deep"
           status="Development"
-          description="The backend keeps the provider credential server-side and sends the current conversation for a non-streaming answer. Mode selection is preserved for future routing; it does not select different models yet."
+          description="Chat text is sent through the backend for streamed answers. Fast, Smart, and Deep use different bounded policies; the current development setup maps their capability classes to the same configured route. The exact underlying model may vary."
         />
         
         <ProviderCard 
@@ -44,14 +44,14 @@ export default function ProvidersScreen() {
           name="OpenAI" 
           role="Smart & Deep modes" 
           status="Planned"
-          description="Model availability and privacy terms remain unverified. Temporary requests are planned to use store=false where supported. No OpenAI requests occur here." 
+          description="Model availability and privacy terms remain unverified. Temporary requests are planned to use store=false where supported. No direct OpenAI integration is configured here."
         />
         
         <ProviderCard 
-          name="Search (TBD)" 
-          role="Research feature" 
-          status="Planned"
-          description="Subject to commercial and privacy review. The planned integration sends a minimized query, never the full conversation. This preview performs no live search." 
+          name="Web Search"
+          role="Current-information requests"
+          status="Available"
+          description="Kalillac can search for current public information through its backend. Searched answers may include citations and sources; retrieved evidence is sent to the configured AI provider to help answer."
         />
       </ScrollView>
     </View>

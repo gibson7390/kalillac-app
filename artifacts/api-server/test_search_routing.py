@@ -16,6 +16,13 @@ from search_routing import (
 )
 
 
+@pytest.fixture(autouse=True)
+def deterministic_search_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KALILLAC_CHAT_PROVIDER", "openrouter")
+    monkeypatch.setenv("KALILLAC_MODEL", "openrouter/free")
+    monkeypatch.setenv("KALILLAC_OPTIONAL_SEARCH_ENABLED", "true")
+
+
 @pytest.mark.parametrize(
     "query",
     [
