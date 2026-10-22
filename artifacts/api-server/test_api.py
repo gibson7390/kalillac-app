@@ -68,7 +68,7 @@ def clear_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KALILLAC_MAX_OUTPUT_TOKENS_DEEP", "3600")
     monkeypatch.setenv("KALILLAC_MAX_TOTAL_INPUT_CHARS", "50000")
     monkeypatch.setenv("KALILLAC_OPTIONAL_SEARCH_ENABLED", "true")
-    for name in ("provider", "search_provider"):
+    for name in ("provider", "search_provider", "reliability", "provider_candidates"):
         if hasattr(app.state, name):
             delattr(app.state, name)
 
@@ -186,7 +186,7 @@ def test_provider_failure_is_safe_and_retryable() -> None:
     assert response.json() == {
         "error": {
             "code": "provider-rate-limited",
-            "message": "The AI provider is temporarily rate limited.",
+            "message": "Responses are temporarily unavailable. Please try again.",
         }
     }
 

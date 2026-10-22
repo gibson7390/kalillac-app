@@ -5,6 +5,9 @@ const mockExpoFetch = jest.fn<(...args: any[]) => Promise<Response>>();
 jest.mock('expo/fetch', () => ({
   fetch: (...args: unknown[]) => mockExpoFetch(...args),
 }));
+jest.mock('expo-crypto', () => ({
+  randomUUID: () => '12345678-1234-4234-8234-123456789abc',
+}));
 
 import { KalillacChatService } from '../services/KalillacChatService';
 import { StreamTimingSession } from '../services/streamTiming';
@@ -31,6 +34,35 @@ describe('Kalillac backend streaming service', () => {
   beforeEach(() => {
     mockExpoFetch.mockReset();
   });
+
+  it('reuses only an in-memory ephemeral limiter token across service instances', async () => {
+    for (let i = 0; i < 2; i += 1) {
+      mockExpoFetch.mockResolvedValueOnce(responseFromChunks([
+        'event: delta\ndata: {"type":"delta","request_id":"r","text":"Answer"}\n\n',
+        'event: complete\ndata: {"type":"complete","request_id":"r"}\n\n',
+      ]));
+      await new KalillacChatService().streamResponse(() => {});
+    }
+    const first = mockExpoFetch.mock.calls[0][1];
+    const second = mockExpoFetch.mock.calls[1][1];
+    expect(first.headers['X-Kalillac-Session']).toBe('12345678-1234-4234-8234-123456789abc');
+    expect(second.headers['X-Kalillac-Session']).toBe(first.headers['X-Kalillac-Session']);
+    expect(first.body).not.toContain('12345678-1234-4234-8234-123456789abc');
+  });
+
+  it.each(['rate-limited', 'server-busy', 'provider-unavailable', 'provider-timeout'])(
+    'passes %s through the existing error path without losing streamed text',
+    async code => {
+      mockExpoFetch.mockResolvedValueOnce(responseFromChunks([
+        'event: delta\ndata: {"type":"delta","request_id":"r","text":"Partial answer"}\n\n',
+        `event: error\ndata: {"type":"error","request_id":"r","code":"${code}","message":"Please try again."}\n\n`,
+      ]));
+      const updates: string[] = [];
+      await expect(new KalillacChatService().streamResponse(text => updates.push(text)))
+        .rejects.toMatchObject({ code, message: 'Please try again.' });
+      expect(updates).toEqual(['Partial answer']);
+    },
+  );
 
   it('accumulates deltas into one progressively updated assistant response', async () => {
     mockExpoFetch.mockResolvedValue(

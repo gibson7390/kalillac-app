@@ -4,12 +4,14 @@ import os
 import json
 import re
 from dataclasses import dataclass, field
+from contextlib import aclosing
 from typing import Any, AsyncIterator, Protocol, Sequence
 
 import httpx
 from response_text import CustomerTextNormalizer, normalize_customer_text
 from routing import RoutingDecision, render_runtime_system_context
 from runtime_config import ai_timeout_seconds
+from usage_accounting import TokenUsage
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -25,11 +27,14 @@ KALILLAC_SYSTEM_INSTRUCTION = (
 
 
 class ProviderError(Exception):
-    def __init__(self, code: str, message: str, status_code: int = 502) -> None:
+    def __init__(self, code: str, message: str, status_code: int = 502,
+                 *, usage: TokenUsage | None = None, model: str | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.usage = usage or TokenUsage()
+        self.returned_model = model
 
 
 @dataclass(frozen=True)
@@ -37,6 +42,7 @@ class ProviderResult:
     content: str
     model: str | None
     safety_metadata: dict[str, str] = field(default_factory=dict)
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,7 @@ class ProviderStreamEvent:
     text: str = ""
     model: str | None = None
     safety_metadata: dict[str, str] = field(default_factory=dict)
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 class ChatProvider(Protocol):
@@ -81,6 +88,23 @@ def normalize_model_id(value: object) -> str | None:
         if _MODEL_ID.fullmatch(candidate) and not looks_like_credential:
             return candidate
     return None
+
+
+def _check_embedded_error(body: Any) -> None:
+    """Normalize 200/SSE error envelopes without retaining raw provider payloads."""
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return
+    code = error.get("code")
+    if code in {"content_filter", "policy_refusal"}:
+        raise ProviderError("policy-refusal", "This request could not be completed.", 400)
+    if code in {401, 403}:
+        raise ProviderError("provider-authentication-failed", "Temporarily unavailable.", 502)
+    if code == 429:
+        raise ProviderError("provider-rate-limited", "Temporarily unavailable.", 503)
+    if code in {400, 422}:
+        raise ProviderError("provider-request-failed", "This request could not be completed.", 400)
+    raise ProviderError("provider-unavailable", "Temporarily unavailable.", 502)
 
 
 class OpenRouterProvider:
@@ -186,6 +210,10 @@ class OpenRouterProvider:
 
         try:
             body: Any = response.json()
+            _check_embedded_error(body)
+            if body["choices"][0].get("finish_reason") == "content_filter":
+                raise ProviderError("policy-refusal", "This request could not be completed.", 400,
+                                    usage=TokenUsage.from_provider(body.get("usage")), model=body.get("model"))
             content = body["choices"][0]["message"]["content"]
             returned_model = normalize_model_id(body.get("model"))
         except (ValueError, KeyError, IndexError, TypeError) as exc:
@@ -200,15 +228,19 @@ class OpenRouterProvider:
                 "provider-empty-response",
                 "The AI provider returned an empty response.",
                 status_code=502,
+                usage=TokenUsage.from_provider(body.get("usage")),
+                model=returned_model,
             )
 
         visible, safety_metadata = normalize_customer_text(content)
         if not visible.strip():
-            raise ProviderError("provider-empty-response", "The AI provider returned an empty response.")
+            raise ProviderError("provider-empty-response", "The AI provider returned an empty response.",
+                                usage=TokenUsage.from_provider(body.get("usage")), model=returned_model)
         return ProviderResult(
             content=visible.strip(),
             model=returned_model,
             safety_metadata=safety_metadata,
+            usage=TokenUsage.from_provider(body.get("usage")),
         )
 
     async def _stream_response(
@@ -243,6 +275,7 @@ class OpenRouterProvider:
         returned_model: str | None = None
         completed = False
         normalizer = CustomerTextNormalizer()
+        usage = TokenUsage()
         try:
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
@@ -258,10 +291,19 @@ class OpenRouterProvider:
                     body: Any = json.loads(data)
                     if not isinstance(body, dict):
                         raise TypeError
+                    _check_embedded_error(body)
                     candidate_model = body.get("model")
                     if isinstance(candidate_model, str):
                         returned_model = normalize_model_id(candidate_model)
+                    if isinstance(body.get("usage"), dict):
+                        usage = TokenUsage.from_provider(body["usage"])
+                        yield ProviderStreamEvent("usage", model=returned_model, usage=usage)
                     choices = body["choices"]
+                    # Providers may report usage in a final choices=[] frame.
+                    if choices == [] and isinstance(body.get("usage"), dict):
+                        continue
+                    if choices[0].get("finish_reason") == "content_filter":
+                        raise ProviderError("policy-refusal", "This request could not be completed.", 400)
                     delta = choices[0]["delta"]
                     content = delta.get("content", "")
                 except (ValueError, KeyError, IndexError, TypeError):
@@ -308,7 +350,7 @@ class OpenRouterProvider:
         remaining = normalizer.finish()
         if remaining:
             yield ProviderStreamEvent("delta", text=remaining, model=returned_model)
-        yield ProviderStreamEvent("complete", model=returned_model, safety_metadata=normalizer.safety_metadata)
+        yield ProviderStreamEvent("complete", model=returned_model, safety_metadata=normalizer.safety_metadata, usage=usage)
 
     async def stream(
         self,
@@ -339,6 +381,7 @@ class OpenRouterProvider:
                 *messages,
             ],
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -357,8 +400,9 @@ class OpenRouterProvider:
                     headers=headers,
                     json=payload,
                 ) as response:
-                    async for event in self._stream_response(response):
-                        yield event
+                    async with aclosing(self._stream_response(response)) as events:
+                        async for event in events:
+                            yield event
             except ProviderError:
                 raise
             except httpx.TimeoutException as exc:
@@ -375,10 +419,12 @@ class OpenRouterProvider:
                 ) from exc
 
         if self._client is not None:
-            async for event in consume(self._client):
-                yield event
+            async with aclosing(consume(self._client)) as events:
+                async for event in events:
+                    yield event
             return
 
         async with httpx.AsyncClient(timeout=ai_timeout_seconds()) as client:
-            async for event in consume(client):
-                yield event
+            async with aclosing(consume(client)) as events:
+                async for event in events:
+                    yield event

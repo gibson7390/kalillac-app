@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import replace
+from contextlib import AsyncExitStack, aclosing
 from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -36,6 +37,8 @@ from search_provider import (
     TavilySearchProvider,
 )
 from search_routing import PreparedMessages, prepare_messages
+from reliability import BudgetedSearch, ProviderCandidate, ReliabilityRuntime, public_error
+from request_limits import RequestBodyLimit
 
 
 MAX_USER_INPUT_CHARS = max_user_input_chars()
@@ -130,12 +133,13 @@ class ErrorResponse(BaseModel):
 
 
 app = FastAPI(title="Kalillac API", version="2.0")
+app.add_middleware(RequestBodyLimit)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Request-ID"],
+    allow_headers=["Content-Type", "X-Request-ID", "X-Kalillac-Session"],
 )
 
 
@@ -151,6 +155,18 @@ def get_search_provider(request: Request) -> SearchProvider:
     if configured_provider is not None:
         return configured_provider
     return TavilySearchProvider()
+
+
+def get_runtime(request: Request) -> ReliabilityRuntime:
+    if not hasattr(request.app.state, "reliability"):
+        request.app.state.reliability = ReliabilityRuntime()
+    return request.app.state.reliability
+
+
+def get_candidates(request: Request, provider: ChatProvider):
+    return getattr(request.app.state, "provider_candidates", None) or [
+        ProviderCandidate("openrouter-primary", "openrouter", provider),
+    ]
 
 
 async def prepare_chat_messages(
@@ -194,6 +210,7 @@ async def request_validation_handler(
 
 @app.exception_handler(ProviderError)
 async def provider_error_handler(_request: Request, exc: ProviderError) -> JSONResponse:
+    exc = public_error(exc)
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": exc.code, "message": exc.message}},
@@ -210,9 +227,29 @@ async def api_health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/readyz")
+async def readiness(request: Request):
+    import os
+    try:
+        runtime = get_runtime(request)
+    except ValueError:
+        return JSONResponse(status_code=503, content={"ready": False, "configuration_valid": False})
+    configured = bool(os.getenv("OPENROUTER_API_KEY"))
+    states = [breaker.state for breaker in runtime.breakers.values()]
+    circuit = "open" if states and all(s == "open" for s in states) else (
+        "degraded" if any(s != "closed" for s in states) else "closed")
+    ready = configured and circuit != "open" and not runtime.capacity.overloaded
+    return JSONResponse(status_code=200 if ready else 503, content={
+        "ready": ready, "ai_configured": configured,
+        "search_configured": bool(os.getenv("TAVILY_API_KEY")),
+        "circuit": circuit, "overloaded": runtime.capacity.overloaded,
+    })
+
+
 @app.post("/api/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(
     payload: ChatRequest,
+    request: Request,
     provider: Annotated[ChatProvider, Depends(get_provider)],
     search_provider: Annotated[SearchProvider, Depends(get_search_provider)],
     x_request_id: Annotated[str | None, Header()] = None,
@@ -220,6 +257,16 @@ async def chat(
     request_id = payload.request_id or x_request_id or uuid.uuid4().hex
     messages = [message.model_dump() for message in payload.messages]
     decision = decide_routing(payload.mode, messages)
+    runtime = get_runtime(request)
+    async with runtime.request(decision, messages, request.headers.get("x-kalillac-session")) as operation:
+        async with AsyncExitStack() as stack:
+            if decision.product_topic is None or decision.product_topic is ProductTopic.MODEL_PROVIDER:
+                await stack.enter_async_context(runtime.capacity.lease())
+            return await complete_chat(payload, request, provider, search_provider, request_id,
+                                       decision, runtime, operation)
+
+
+async def complete_chat(payload, request, provider, search_provider, request_id, decision, runtime, operation):
     if decision.product_topic is not None and decision.product_topic is not ProductTopic.MODEL_PROVIDER:
         return ChatResponse(
             content=answer_product_question(
@@ -237,13 +284,18 @@ async def chat(
             )),
         )
 
-    prepared = await prepare_chat_messages(payload, search_provider, decision)
+    executor = runtime.executor(get_candidates(request, provider))
+    executor.ensure_available()
+    prepared = await prepare_chat_messages(payload, BudgetedSearch(search_provider, runtime, operation, "tavily"), decision)
+    runtime.prepared_budget(decision, prepared.messages)
     decision = replace(decision, search_used=bool(prepared.sources))
-    result = await provider.complete(
+    result = await executor.complete(
         prepared.messages,
         decision=decision,
         request_id=request_id,
+        operation=operation,
     )
+    decision = operation.actual_decision
     content = result.content
     returned_model = normalize_model_id(result.model)
     if decision.product_topic is ProductTopic.MODEL_PROVIDER:
@@ -301,13 +353,15 @@ def encode_stream_event(
 @app.post("/api/chat/stream")
 async def chat_stream(
     payload: ChatRequest,
+    request: Request,
     provider: Annotated[ChatProvider, Depends(get_provider)],
     search_provider: Annotated[SearchProvider, Depends(get_search_provider)],
     x_request_id: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     request_id = payload.request_id or x_request_id or uuid.uuid4().hex
+    runtime = get_runtime(request)
 
-    async def events() -> AsyncIterator[str]:
+    async def events(operation) -> AsyncIterator[str]:
         try:
             messages = [message.model_dump() for message in payload.messages]
             decision = decide_routing(payload.mode, messages)
@@ -331,7 +385,10 @@ async def chat_stream(
                 )
                 return
 
-            prepared = await prepare_chat_messages(payload, search_provider, decision)
+            executor = runtime.executor(get_candidates(request, provider))
+            executor.ensure_available()
+            prepared = await prepare_chat_messages(payload, BudgetedSearch(search_provider, runtime, operation, "tavily"), decision)
+            runtime.prepared_budget(decision, prepared.messages)
             decision = replace(decision, search_used=bool(prepared.sources))
             source_ids = {source.id for source in prepared.sources}
             citation_validator = None
@@ -340,11 +397,22 @@ async def chat_stream(
 
                 citation_validator = StreamingCitationValidator(source_ids)
             completed = False
-            async for event in provider.stream(
+            seen_attempts = 0
+            stream = executor.stream(
                 prepared.messages,
                 decision=decision,
                 request_id=request_id,
-            ):
+                operation=operation,
+                managed_visibility=True,
+                allow_metadata_only=decision.product_topic is ProductTopic.MODEL_PROVIDER,
+            )
+            async with aclosing(stream):
+              async for event in stream:
+                if len(operation.attempts) != seen_attempts:
+                    if seen_attempts and citation_validator is not None:
+                        from citation_validation import StreamingCitationValidator
+                        citation_validator = StreamingCitationValidator(source_ids)
+                    seen_attempts = len(operation.attempts)
                 if event.kind == "delta":
                     if decision.product_topic is ProductTopic.MODEL_PROVIDER:
                         # Model self-identification is untrusted. Wait for returned
@@ -352,12 +420,14 @@ async def chat_stream(
                         continue
                     text = citation_validator.feed(event.text) if citation_validator else event.text
                     if text:
+                        operation.visible |= bool(text.strip())
                         yield encode_stream_event(
                             "delta",
                             request_id=request_id,
                             text=text,
                         )
                 elif event.kind == "complete":
+                    decision = operation.actual_decision
                     returned_model = normalize_model_id(event.model)
                     if decision.product_topic is ProductTopic.MODEL_PROVIDER:
                         yield encode_stream_event(
@@ -407,22 +477,32 @@ async def chat_stream(
         except asyncio.CancelledError:
             raise
         except ProviderError as exc:
-            yield encode_stream_event(
-                "error",
-                request_id=request_id,
-                code=exc.code,
-                message=exc.message,
-            )
+            raise
         except Exception:
-            yield encode_stream_event(
-                "error",
-                request_id=request_id,
-                code="stream-failed",
-                message="The Kalillac backend could not complete the response.",
-            )
+            raise ProviderError("stream-failed", "Responses are temporarily unavailable.", 502) from None
+
+    async def guarded_events():
+        messages = [message.model_dump() for message in payload.messages]
+        decision = decide_routing(payload.mode, messages)
+        try:
+            async with runtime.request(decision, messages, request.headers.get("x-kalillac-session")) as operation:
+                async with AsyncExitStack() as stack:
+                    if decision.product_topic is None or decision.product_topic is ProductTopic.MODEL_PROVIDER:
+                        await stack.enter_async_context(runtime.capacity.lease())
+                    async with aclosing(events(operation)) as stream:
+                        async for chunk in stream:
+                            yield chunk
+        except asyncio.CancelledError:
+            raise
+        except ProviderError as exc:
+            error = public_error(exc)
+            yield encode_stream_event("error", request_id=request_id, code=error.code, message=error.message)
+        except Exception:
+            yield encode_stream_event("error", request_id=request_id,
+                                      code="stream-failed", message="Responses are temporarily unavailable.")
 
     return StreamingResponse(
-        events(),
+        guarded_events(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

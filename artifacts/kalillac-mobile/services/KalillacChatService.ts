@@ -6,6 +6,7 @@ import type {
 import type { ChatSource } from './chatSources';
 import { consumeKalillacStream, StreamProtocolError } from './streamProtocol';
 import { fetch as expoFetch } from 'expo/fetch';
+import { randomUUID } from 'expo-crypto';
 import type { StreamTimingSession } from './streamTiming';
 
 export class BackendChatError extends Error {
@@ -32,6 +33,12 @@ function resolveApiBaseUrl(): string {
 
 function createRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Advisory accountless limiter key, kept only for this app process. Not a user identity.
+let ephemeralSessionId: string | undefined;
+function getEphemeralSessionId(): string {
+  return ephemeralSessionId ??= randomUUID();
 }
 
 export class KalillacChatService implements ChatTransport {
@@ -65,6 +72,7 @@ export class KalillacChatService implements ChatTransport {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
           'X-Request-ID': requestId,
+          'X-Kalillac-Session': getEphemeralSessionId(),
         },
         body: JSON.stringify({ messages, mode, request_id: requestId }),
         signal: controller.signal,
