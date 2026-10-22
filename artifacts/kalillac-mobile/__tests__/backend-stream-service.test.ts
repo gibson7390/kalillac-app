@@ -8,6 +8,17 @@ jest.mock('expo/fetch', () => ({
 jest.mock('expo-crypto', () => ({
   randomUUID: () => '12345678-1234-4234-8234-123456789abc',
 }));
+// These transport regression fixtures represent an explicitly consented session.
+// The real gate and denied-network spies are exercised in ai-processing-consent.test.ts.
+jest.mock('../services/aiProcessingConsent', () => ({
+  aiProcessingConsent: {
+    getSnapshot: () => ({ loaded: true, state: 'allowed' }),
+    ensureAllowed: async () => {},
+    assertAllowed: () => {},
+    isAllowed: () => true,
+    subscribe: () => () => {},
+  },
+}));
 
 import { KalillacChatService } from '../services/KalillacChatService';
 import { StreamTimingSession } from '../services/streamTiming';
@@ -33,6 +44,14 @@ function responseFromChunks(chunks: string[]): Response {
 describe('Kalillac backend streaming service', () => {
   beforeEach(() => {
     mockExpoFetch.mockReset();
+  });
+
+  it.each([413, 422])('normalizes HTTP %s validation failure without duplicating server limits', async status => {
+    mockExpoFetch.mockResolvedValueOnce(new Response(JSON.stringify({ detail: [{ msg: 'RAW_VALIDATION_SENTINEL' }] }), {
+      status, headers: { 'content-type': 'application/json' },
+    }));
+    await expect(new KalillacChatService().streamResponse(() => {})).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
   });
 
   it('reuses only an in-memory ephemeral limiter token across service instances', async () => {

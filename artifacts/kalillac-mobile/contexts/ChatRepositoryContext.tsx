@@ -7,6 +7,7 @@ import { savedChatStore } from '../services/savedChatAdapter';
 import { snapshotForStorage } from '../services/savedChatStore.ts';
 import { persistThenCommitSnapshot } from '../services/savedSnapshotTransaction';
 import type { ChatSource } from '../services/chatSources';
+import { replaceActiveBranch } from '../utils/conversationUX';
 
 export type AIModelMode = 'Auto' | 'Fast' | 'Smart' | 'Deep';
 export type ChatRequestStatus =
@@ -211,6 +212,7 @@ interface ChatRepositoryState {
   beginRequest: (sessionId: string, prompt: string, messageId: string, retry?: boolean) => void;
   updateRequestState: (sessionId: string, updates: Partial<ChatRequestState> & { status: ChatRequestStatus }) => void;
   deleteMessageAndAfter: (sessionId: string, messageId: string) => void;
+  replaceUserMessageAndAfter: (sessionId: string, messageId: string, text: string) => void;
   saveSession: (sessionId: string, operationId?: string) => Promise<string>;
   updateSavedSession: (temporarySessionId: string, savedSessionId: string, operationId?: string) => Promise<void>;
   corruptRandomSession: () => void;
@@ -450,6 +452,10 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const replaceUserMessageAndAfter = useCallback((sessionId: string, messageId: string, text: string) => {
+    setActiveSessions(previous => replaceActiveBranch(previous, sessionId, messageId, text));
+  }, []);
+
   const saveSession = useCallback(async (sessionId: string, operationId = sessionId) => {
     if (!savedLoaded || savedLoadError) throw new Error('Saved chats are unavailable');
     const session = activeSessions.find(s => s.id === sessionId);
@@ -527,6 +533,7 @@ export function ChatRepositoryProvider({ children }: { children: ReactNode }) {
        beginRequest,
        updateRequestState,
       deleteMessageAndAfter,
+      replaceUserMessageAndAfter,
       saveSession,
       updateSavedSession,
       corruptRandomSession

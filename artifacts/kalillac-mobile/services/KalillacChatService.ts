@@ -8,6 +8,8 @@ import { consumeKalillacStream, StreamProtocolError } from './streamProtocol';
 import { fetch as expoFetch } from 'expo/fetch';
 import { randomUUID } from 'expo-crypto';
 import type { StreamTimingSession } from './streamTiming';
+import { aiProcessingConsent } from './aiProcessingConsent';
+import { AIProcessingConsentRequiredError } from './aiProcessingConsentState';
 
 export class BackendChatError extends Error {
   constructor(
@@ -61,11 +63,30 @@ export class KalillacChatService implements ChatTransport {
     const requestGeneration = ++this.requestGeneration;
     const controller = new AbortController();
     this.controller = controller;
-    const requestId = createRequestId();
-    this.timing?.requestStarted(requestId);
-    this.onRequestStarted?.(requestId);
+    let permissionChecked = false;
+    let permissionWithdrawn = false;
+    const unsubscribe = aiProcessingConsent.subscribe(() => {
+      if (permissionChecked && !aiProcessingConsent.isAllowed()) {
+        permissionWithdrawn = true;
+        controller.abort();
+      }
+    });
 
     try {
+      // Hard gate for EVERY inference action, including callers bypassing the UI.
+      if (!aiProcessingConsent.getSnapshot().loaded) await aiProcessingConsent.ensureAllowed();
+      aiProcessingConsent.assertAllowed();
+      if (controller.signal.aborted || requestGeneration !== this.requestGeneration) {
+        const error = new Error('Request stopped');
+        error.name = 'AbortError';
+        throw error;
+      }
+      permissionChecked = true;
+      const requestId = createRequestId();
+      this.timing?.requestStarted(requestId);
+      this.onRequestStarted?.(requestId);
+      // Recheck after callbacks; no await between this check and fetch.
+      aiProcessingConsent.assertAllowed();
       const response = await expoFetch(`${resolveApiBaseUrl()}/api/chat/stream`, {
         method: 'POST',
         headers: {
@@ -86,14 +107,14 @@ export class KalillacChatService implements ChatTransport {
           payload = null;
         }
         throw new BackendChatError(
-          payload?.error?.code || 'backend-request-failed',
+          payload?.error?.code || ([413, 422].includes(response.status) ? 'invalid-request' : 'backend-request-failed'),
           payload?.error?.message || 'The Kalillac backend could not answer.',
         );
       }
 
       let content = '';
       await consumeKalillacStream(response, event => {
-        if (requestGeneration !== this.requestGeneration) return;
+        if (requestGeneration !== this.requestGeneration || controller.signal.aborted || !aiProcessingConsent.isAllowed()) return;
         if (event.type === 'delta') {
           this.timing?.parsedDelta();
           content += event.text;
@@ -110,7 +131,11 @@ export class KalillacChatService implements ChatTransport {
           this.timing?.completed();
         }
       });
+      if (permissionWithdrawn) throw new AIProcessingConsentRequiredError();
     } catch (error) {
+      if (permissionWithdrawn || error instanceof AIProcessingConsentRequiredError) {
+        throw new AIProcessingConsentRequiredError();
+      }
       if (error instanceof BackendChatError) throw error;
       if (error instanceof Error && error.name === 'AbortError') throw error;
       if (error instanceof StreamProtocolError) {
@@ -121,6 +146,7 @@ export class KalillacChatService implements ChatTransport {
         'The Kalillac backend could not be reached.',
       );
     } finally {
+      unsubscribe();
       if (this.controller === controller) this.controller = null;
     }
   }

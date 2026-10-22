@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
@@ -10,7 +10,7 @@ import {
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Button } from '@/components/Button';
 import * as Haptics from 'expo-haptics';
 
@@ -27,7 +27,17 @@ export default function SavedTab() {
     createSession,
   } = useChatRepository();
 
+  const openingRef = useRef(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  useFocusEffect(useCallback(() => {
+    openingRef.current = false;
+    setOpeningId(null);
+  }, []));
+
   const handleOpen = async (id: string) => {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpeningId(id);
     try {
       if (hapticsEnabled) Haptics.selectionAsync();
       const activeId = await continueSavedSession(id);
@@ -35,8 +45,12 @@ export default function SavedTab() {
         router.push(`/chat/${activeId}`);
         return;
       }
+      openingRef.current = false;
+      setOpeningId(null);
     } catch {
-      Alert.alert('Could not open snapshot', 'This saved chat is unavailable or damaged.');
+      openingRef.current = false;
+      setOpeningId(null);
+      Alert.alert('Could not open snapshot', 'This saved chat is unavailable or damaged. You can delete it or try again.');
     }
   };
 
@@ -70,6 +84,8 @@ export default function SavedTab() {
   };
 
   const handleStart = () => {
+    if (openingRef.current) return;
+    openingRef.current = true;
     if (hapticsEnabled) Haptics.selectionAsync();
     const id = createSession();
     router.push(`/chat/${id}`);
@@ -82,7 +98,9 @@ export default function SavedTab() {
         onPress={() => handleOpen(item.id)}
         accessibilityRole="button"
         accessibilityLabel={`Open saved chat: ${item.title}`}
-        style={styles.itemTouch}
+        accessibilityState={{ busy: openingId === item.id, disabled: openingId !== null }}
+        disabled={openingId !== null}
+        style={[styles.itemTouch, openingId !== null && openingId !== item.id && { opacity: 0.5 }]}
       >
         <View style={[styles.iconBox, { backgroundColor: colors.surfaceSecondary }]}>
           <Ionicons name="bookmark-outline" size={16} color={colors.textSecondary} />
@@ -90,7 +108,9 @@ export default function SavedTab() {
         <View style={styles.itemContent}>
           <ThemedText variant="body" weight="medium" numberOfLines={1}>{item.title}</ThemedText>
           <ThemedText variant="caption" color="secondary" style={{ marginTop: 2 }}>
-            Snapshot · {new Date(item.updatedAt).toLocaleDateString()} · {item.messages.length} messages
+            {openingId === item.id
+              ? 'Restoring…'
+              : `Snapshot · ${new Date(item.updatedAt).toLocaleDateString()} · ${item.messages.length} ${item.messages.length === 1 ? 'message' : 'messages'}`}
           </ThemedText>
         </View>
       </TouchableOpacity>
@@ -99,7 +119,7 @@ export default function SavedTab() {
         onPress={() => handleDelete(item.id)}
         testID={`delete-saved-conversation-${item.id}`}
         accessibilityRole="button"
-        accessibilityLabel="Delete conversation"
+        accessibilityLabel={`Delete saved chat: ${item.title}`}
       >
         <Ionicons name="trash-outline" size={20} color={colors.error} />
       </TouchableOpacity>
@@ -123,19 +143,25 @@ export default function SavedTab() {
         renderItem={renderItem}
         contentContainerStyle={[styles.listContent, { paddingHorizontal: Spacing.lg, paddingBottom: Math.max(insets.bottom + 20, 100) }, savedSessions.length === 0 && { flex: 1, paddingHorizontal: 0 }]}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="bookmark-outline" size={48} color={colors.border} />
-            <ThemedText variant="body" color="secondary" align="center" style={{ marginTop: Spacing.md, marginBottom: Spacing.xl }}>
+          <View style={styles.empty} accessibilityLiveRegion="polite">
+            <Ionicons
+              name={savedLoadError ? 'alert-circle-outline' : !savedLoaded ? 'hourglass-outline' : 'bookmark-outline'}
+              size={44}
+              color={savedLoadError ? colors.error : colors.textTertiary}
+            />
+            <ThemedText variant="body" weight="semiBold" align="center" accessibilityRole="header" style={{ marginTop: Spacing.md }}>
+              {savedLoadError ? 'Saved chats unavailable' : !savedLoaded ? 'Loading saved chats…' : 'No saved chats yet'}
+            </ThemedText>
+            <ThemedText variant="bodySm" color="secondary" align="center" style={{ marginTop: Spacing.xs, marginBottom: Spacing.lg, lineHeight: 20 }}>
               {savedLoadError
-                ? 'Saved chats could not be loaded on this device. Please restart the app.'
+                ? 'Saved chats could not be read on this device. Restart the app to try again. Temporary chats still work.'
                 : !savedLoaded
-                  ? 'Loading saved chats…'
-                  : "You haven't saved any snapshots yet."}
+                  ? Platform.OS === 'web' ? 'Reading this browser preview’s snapshots.' : 'Reading encrypted snapshots on this device.'
+                  : 'Chats stay temporary until you choose Save. In a chat, tap Save to keep a snapshot here.'}
             </ThemedText>
-            <ThemedText variant="caption" color="secondary" align="center" style={{ marginBottom: Spacing.md }}>
-              Chats stay temporary until you choose Save.
-            </ThemedText>
-            <Button title="Start a temporary chat" onPress={handleStart} variant="secondary" />
+            {savedLoaded && (
+              <Button title="Start a temporary chat" onPress={handleStart} variant="secondary" accessibilityLabel="Start a temporary chat" />
+            )}
           </View>
         }
         ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
@@ -169,6 +195,8 @@ const styles = StyleSheet.create({
   },
   itemContent: { flex: 1, paddingRight: Spacing.md },
   deleteBtn: {
+    minWidth: 44,
+    minHeight: 44,
     padding: Spacing.md,
     alignItems: 'center',
     justifyContent: 'center',

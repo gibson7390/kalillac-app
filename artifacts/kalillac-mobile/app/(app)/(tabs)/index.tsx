@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Spacing, Radii } from '@/constants/Theme';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useChatRepository, AIModelMode, meaningfulActiveSessions } from '@/contexts/ChatRepositoryContext';
 import { BrandLockup } from '@/components/BrandLockup';
 import * as Haptics from 'expo-haptics';
@@ -15,8 +15,18 @@ export default function HomeTab() {
   const insets = useSafeAreaInsets();
   const { createSession, activeSessions } = useChatRepository();
   const resumableSessions = meaningfulActiveSessions(activeSessions);
+  // Synchronous guard against double taps creating/pushing two chats.
+  const navigatingRef = useRef(false);
+  useFocusEffect(useCallback(() => { navigatingRef.current = false; }, []));
+
+  const beginNavigation = () => {
+    if (navigatingRef.current) return false;
+    navigatingRef.current = true;
+    return true;
+  };
 
   const handleNewChat = (mode: AIModelMode = 'Auto', task?: string) => {
+    if (!beginNavigation()) return;
     if (hapticsEnabled) Haptics.selectionAsync();
     const id = createSession(mode);
     if (task) {
@@ -39,13 +49,18 @@ export default function HomeTab() {
           style={[styles.mockInput, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => handleNewChat('Auto')}
           accessibilityRole="button"
-          accessibilityLabel="Start a new conversation"
+          accessibilityLabel="Start a new temporary chat"
+          accessibilityHint="Opens a new chat in Auto mode. You can change the mode in the chat."
         >
-          <ThemedText variant="body" color="tertiary">Ask Kalillac anything...</ThemedText>
+          <ThemedText variant="body" color="tertiary" style={styles.mockInputText} numberOfLines={1}>Ask Kalillac anything…</ThemedText>
           <View style={[styles.mockInputBtn, { backgroundColor: colors.accent }]}>
             <Ionicons name="arrow-up" size={18} color={colors.textBubbleUser} />
           </View>
         </TouchableOpacity>
+
+        <ThemedText variant="caption" color="secondary" style={styles.modeHint}>
+          Starts in Auto. Switch to Fast, Smart, or Deep inside the chat.
+        </ThemedText>
 
         {resumableSessions.length > 0 && (
           <View style={styles.activeSection}>
@@ -62,6 +77,7 @@ export default function HomeTab() {
                     index !== resumableSessions.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }
                   ]}
                   onPress={() => {
+                    if (!beginNavigation()) return;
                     if (hapticsEnabled) Haptics.selectionAsync();
                     router.push(`/chat/${activeSession.id}`)
                   }}
@@ -90,10 +106,10 @@ export default function HomeTab() {
         </ThemedText>
 
         <View style={[styles.cardGroup, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <ActionRow icon="search-outline" title="Research" description="Deep dive with citations" onPress={() => handleNewChat('Auto', 'Research')} />
+          <ActionRow icon="search-outline" title="Research" description="Look into a topic, with web sources when useful" onPress={() => handleNewChat('Auto', 'Research')} />
           <ActionRow icon="code-slash-outline" title="Code" description="Explore a code example" onPress={() => handleNewChat('Auto', 'Code')} />
           <ActionRow icon="book-outline" title="Study" description="Explain complex topics" onPress={() => handleNewChat('Auto', 'Study')} />
-          <ActionRow icon="flash-outline" title="Search" description="Explore sample sources" onPress={() => handleNewChat('Fast', 'Search')} />
+          <ActionRow icon="globe-outline" title="Search" description="Check current public information" onPress={() => handleNewChat('Fast', 'Search')} />
           <ActionRow icon="analytics-outline" title="Analyze" description="Compare the trade-offs" onPress={() => handleNewChat('Auto', 'Analyze')} />
           <ActionRow icon="create-outline" title="Create" description="Find a starting point" onPress={() => handleNewChat('Auto', 'Create')} isLast />
         </View>
@@ -136,7 +152,10 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: Spacing.xs,
   },
+  mockInputText: { flex: 1, marginRight: Spacing.sm },
+  modeHint: { marginTop: Spacing.sm, marginBottom: Spacing.xl, marginLeft: Spacing.md },
   mockInput: {
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -144,7 +163,6 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.md,
     borderRadius: Radii.full,
     borderWidth: 1,
-    marginBottom: Spacing.xxl,
   },
   mockInputBtn: {
     width: 32,
@@ -168,11 +186,13 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   activeRow: {
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.md,
   },
   actionRow: {
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.md,

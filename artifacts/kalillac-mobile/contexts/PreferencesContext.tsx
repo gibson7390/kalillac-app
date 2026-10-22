@@ -1,7 +1,8 @@
 import { useState, useEffect, createContext, useContext } from 'react';
-import { useColorScheme, AccessibilityInfo, Alert } from 'react-native';
+import { useColorScheme, AccessibilityInfo } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Palette, Typography, Spacing, Radii } from '../constants/Theme';
+import { safeReadPrefs, safeWritePrefs, applyOnboardingComplete } from '../utils/onboarding';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -45,8 +46,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     let mounted = true;
     (async () => {
       try {
-        const reduceSystem = await AccessibilityInfo.isReduceMotionEnabled();
-        const stored = await AsyncStorage.getItem(PREFS_KEY);
+        const reduceSystem = await AccessibilityInfo.isReduceMotionEnabled().catch(() => false);
+        const stored = await safeReadPrefs(AsyncStorage, PREFS_KEY);
         let loadedPrefs: Partial<typeof prefs> = {};
         if (stored) {
           const parsed = JSON.parse(stored);
@@ -62,7 +63,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
           setIsLoaded(true);
         }
       } catch (e) {
-        Alert.alert('Persistence Error', 'Failed to load preferences.');
+        // Storage failure must never block the app; fall back to defaults.
+        if (__DEV__) console.warn('Preferences load failed; using defaults.');
         if (mounted) setIsLoaded(true);
       }
     })();
@@ -70,18 +72,15 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const savePrefs = async (newPrefs: typeof prefs) => {
+    // In-memory first: the UI never waits on storage.
     setPrefs(newPrefs);
-    try {
-      const allowed = {
-        themeMode: newPrefs.themeMode,
-        hapticsEnabled: newPrefs.hapticsEnabled,
-        reduceMotion: newPrefs.reduceMotion,
-        hasOnboarded: newPrefs.hasOnboarded,
-      };
-      await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(allowed));
-    } catch (e) {
-      Alert.alert('Persistence Error', 'Failed to save preferences.');
-    }
+    const ok = await safeWritePrefs(AsyncStorage, PREFS_KEY, {
+      themeMode: newPrefs.themeMode,
+      hapticsEnabled: newPrefs.hapticsEnabled,
+      reduceMotion: newPrefs.reduceMotion,
+      hasOnboarded: newPrefs.hasOnboarded,
+    });
+    if (!ok && __DEV__) console.warn('Preferences save failed; kept in memory only.');
   };
 
   const isDark = prefs.themeMode === 'system' ? systemColorScheme === 'dark' : prefs.themeMode === 'dark';
@@ -94,12 +93,15 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     isLoaded,
     offlineMode,
     apiErrorMode,
-    setThemeMode: (themeMode) => savePrefs({ ...prefs, themeMode }),
-    setHapticsEnabled: (hapticsEnabled) => savePrefs({ ...prefs, hapticsEnabled }),
-    setReduceMotion: (reduceMotion) => savePrefs({ ...prefs, reduceMotion }),
+    setThemeMode: (themeMode) => void savePrefs({ ...prefs, themeMode }),
+    setHapticsEnabled: (hapticsEnabled) => void savePrefs({ ...prefs, hapticsEnabled }),
+    setReduceMotion: (reduceMotion) => void savePrefs({ ...prefs, reduceMotion }),
     setOfflineMode,
     setApiErrorMode,
-    completeOnboarding: () => savePrefs({ ...prefs, hasOnboarded: true }),
+    completeOnboarding: () => {
+      const { next, changed } = applyOnboardingComplete(prefs);
+      if (changed) void savePrefs(next);
+    },
   };
 
   return (

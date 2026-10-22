@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, StyleSheet, FlatList, TextInput, TouchableOpacity, 
   Platform, ActivityIndicator, Alert, Share,
-  Linking, ScrollView, useWindowDimensions
+  Linking, ScrollView, useWindowDimensions, AccessibilityInfo
 } from 'react-native';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +39,15 @@ import { markdownForDisplayWithInfo } from '@/utils/streamingMarkdown';
 import { regenerationPlan, startRegeneration } from '@/utils/regeneration';
 import { nativeDiagnostics } from '@/dev/nativeDiagnostics';
 import { customerVisibleAssistantText } from '@/utils/customerVisibleText';
+import { MODE_DESCRIPTIONS } from '@/constants/modes';
+import {
+  canStartGeneration, cancelledEditDraft, copyMessage, editResendPlan, shouldShowLatest,
+  type EditDraft,
+} from '@/utils/conversationUX';
+import { ResponseNotice } from '@/components/ResponseNotice';
+import { useAIProcessingConsent } from '@/hooks/useAIProcessingConsent';
+import { aiProcessingConsent } from '@/services/aiProcessingConsent';
+import { AIProcessingConsentRequiredError, consentStorageNotice } from '@/services/aiProcessingConsentState';
 
 function toBackendMessages(
   messages: ChatMessage[],
@@ -127,11 +136,12 @@ function AssistantRenderCommitProbe({
 export default function ChatScreen() {
   const { id, task, fixture } = useLocalSearchParams<{ id: string; task?: string; fixture?: string }>();
   const { colors, offlineMode, apiErrorMode, hapticsEnabled } = usePreferences();
+  const consent = useAIProcessingConsent();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   
   const {
-    getSession, addMessage, updateMessage, deleteMessageAndAfter, saveSession,
+    getSession, addMessage, updateMessage, deleteMessageAndAfter, replaceUserMessageAndAfter, saveSession,
     updateSavedSession, deleteLogicalConversation, registerRequestCancellation,
     savedLoaded, savedLoadError,
     beginRequest, updateRequestState,
@@ -156,6 +166,17 @@ export default function ChatScreen() {
   const assistantReceivedContentRef = useRef(new Map<string, string>());
   const messageKeysRef = useRef(new Map<string, string>());
   const inputRef = useRef<TextInput>(null);
+  const messageListRef = useRef<FlatList<ChatMessage>>(null);
+  const [showLatest, setShowLatest] = useState(false);
+  const [editing, setEditing] = useState<EditDraft | null>(null);
+  const [actionMessageId, setActionMessageId] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<{ messageId: string; text: string } | null>(null);
+  const reviewAIProcessing = () => router.push({ pathname: '/onboarding', params: { revisit: '1' } });
+  const ensureAIConsent = () => {
+    if (aiProcessingConsent.isAllowed()) return true;
+    reviewAIProcessing();
+    return false;
+  };
 
   useEffect(() => {
     if (__DEV__ && Platform.OS === 'ios') {
@@ -201,7 +222,25 @@ export default function ChatScreen() {
     return registerRequestCancellation(session.id, () => cancelActiveRequest('conversation-deleted'));
   }, [session?.id, registerRequestCancellation, cancelActiveRequest]);
 
-  if (!session) return null;
+  if (!session) return (
+    <View style={[styles.container, styles.unavailableState, { backgroundColor: colors.background }]}>
+      {savedLoaded ? (
+        <>
+          <ThemedText variant="h2">Chat unavailable</ThemedText>
+          <ThemedText color="secondary" align="center">Temporary chats clear when the app closes. Start a new conversation from Home.</ThemedText>
+          <TouchableOpacity onPress={() => router.replace('/(app)/(tabs)')} accessibilityRole="button"
+            accessibilityLabel="Go to Home" style={styles.noticeButton}>
+            <ThemedText style={{ color: colors.accent }}>Go to Home</ThemedText>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <View accessibilityLiveRegion="polite">
+          <ActivityIndicator color={colors.accent} />
+          <ThemedText color="secondary">Opening your chats…</ThemedText>
+        </View>
+      )}
+    </View>
+  );
 
   if (session.corrupted) {
     return (
@@ -316,16 +355,18 @@ export default function ChatScreen() {
         ...assistantRenderStats(latestContent, deltaNumber, 'failed'),
         errorClass: e instanceof Error ? e.name : 'UnknownError',
       });
+      const errorCode = e instanceof BackendChatError || e instanceof AIProcessingConsentRequiredError
+        ? e.code : 'backend-failure';
       updateMessage(sessionId, aiMessageId, {
         content: latestContent,
         isStreaming: false,
         requestStatus: 'api-failure',
-        requestError: e instanceof BackendChatError ? e.code : 'backend-failure',
+        requestError: errorCode,
       });
       updateRequestState(sessionId, {
         status: 'api-failure',
         messageId: aiMessageId,
-        error: e instanceof BackendChatError ? e.code : 'backend-failure',
+        error: errorCode,
       });
       activeMessageIdRef.current = null;
       setIsGenerating(false);
@@ -337,7 +378,8 @@ export default function ChatScreen() {
   };
 
   const handleSend = () => {
-    if ((!input.trim() && attachments.length === 0) || isGenerating) return;
+    if (!canStartGeneration(input, isGenerating, activeMessageIdRef.current)) return;
+    if (!ensureAIConsent()) return;
 
     if (activeMode === 'Deep' || activeMode === 'Smart') {
        if (status !== 'plus' || !consumeAllowance(1)) {
@@ -354,17 +396,28 @@ export default function ChatScreen() {
       Alert.alert('Attachments unavailable', 'File requests are not supported in this milestone.');
       return;
     }
-    const backendMessages = toBackendMessages(session.messages, userText, true);
+    const currentMessages = getSession(session.id)?.messages ?? session.messages;
+    const editPlan = editing ? editResendPlan(currentMessages, editing.messageId, userText) : undefined;
+    if (editing && !editPlan) return;
+    const backendMessages = editPlan?.context ?? toBackendMessages(currentMessages, userText, true);
+    const aiMessageId = generateId();
+    // Synchronous lock: a second tap cannot race React's state render.
+    activeMessageIdRef.current = aiMessageId;
     setInput('');
     const currentAttachments = [...attachments];
     setAttachments([]);
 
-    addMessage(session.id, { id: generateId(), role: 'user', content: userText, modeUsed: activeMode, attachments: currentAttachments });
+    if (editing) {
+      replaceUserMessageAndAfter(session.id, editing.messageId, userText);
+      setEditing(null);
+    } else {
+      addMessage(session.id, { id: generateId(), role: 'user', content: userText, modeUsed: activeMode, attachments: currentAttachments });
+    }
+    setActionMessageId(null);
+    setCopyFeedback(null);
     
     setIsGenerating(true);
-    const aiMessageId = generateId();
     cancelledMessageIdsRef.current.delete(aiMessageId);
-    activeMessageIdRef.current = aiMessageId;
     addMessage(session.id, {
       id: aiMessageId,
       role: 'ai',
@@ -395,8 +448,10 @@ export default function ChatScreen() {
 
   const handleRegenerate = (message: ChatMessage) => {
     logAssistantDiagnostic('regenerate_pressed', { assistantMessageId: message.id });
-    if (activeMessageIdRef.current) return;
-    const plan = regenerationPlan(getSession(session.id)?.messages ?? session.messages, message.id);
+    if (activeMessageIdRef.current || isGenerating || editing) return;
+    if (!ensureAIConsent()) return;
+    const currentMessages = getSession(session.id)?.messages ?? session.messages;
+    const plan = regenerationPlan(currentMessages, message.id);
     if (!plan) {
       logAssistantDiagnostic('regenerate_failed', { assistantMessageId: message.id, errorClass: 'MissingSourcePromptError' });
       Alert.alert('Could not retry', 'The original prompt is unavailable. Please send it again.');
@@ -405,6 +460,10 @@ export default function ChatScreen() {
     logAssistantDiagnostic('regenerate_target_resolved', {
       assistantMessageId: message.id, sourceUserMessageId: plan.sourceUserMessageId,
     });
+    const downstream = currentMessages[currentMessages.findIndex(m => m.id === message.id) + 1];
+    if (downstream) deleteMessageAndAfter(session.id, downstream.id);
+    setActionMessageId(null);
+    setCopyFeedback(null);
     if (hapticsEnabled) Haptics.selectionAsync();
     startRegeneration(plan, {
       cancelPrevious: () => cancelActiveRequest(),
@@ -422,21 +481,26 @@ export default function ChatScreen() {
   };
 
   const handleEdit = (msgId: string, content: string) => {
+    if (isGenerating || activeMessageIdRef.current) return;
     if (hapticsEnabled) Haptics.selectionAsync();
-    Alert.alert('Edit Message', 'Clear recent messages and resubmit this prompt?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Resubmit', onPress: () => {
-        handleStop();
-        setInput(content);
-        deleteMessageAndAfter(session.id, msgId);
-        setTimeout(() => inputRef.current?.focus(), 100);
-      }}
-    ]);
+    setEditing({ messageId: msgId, previousDraft: editing?.previousDraft ?? input });
+    setInput(content);
+    setActionMessageId(null);
+    inputRef.current?.focus();
   };
 
-  const handleCopy = (text: string) => {
-    Clipboard.setStringAsync(text);
-    if (hapticsEnabled && Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  const handleCancelEdit = () => {
+    if (!editing) return;
+    setInput(cancelledEditDraft(editing));
+    setEditing(null);
+  };
+
+  const handleCopy = async (message: ChatMessage) => {
+    const text = message.role === 'user' ? message.content : customerVisibleAssistantText(message.content);
+    const copied = await copyMessage(text, Clipboard.setStringAsync, text => AccessibilityInfo.announceForAccessibility?.(text));
+    setCopyFeedback({ messageId: message.id, text: copied ? 'Copied' : 'Couldn’t copy. Try again.' });
+    setActionMessageId(null);
+    if (copied && hapticsEnabled && Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleShare = (text: string) => {
@@ -540,8 +604,6 @@ export default function ChatScreen() {
     const isUser = item.role === 'user';
     const requestStatus = item.requestStatus;
     const isFailed = requestStatus === 'offline' || requestStatus === 'api-failure' || requestStatus === 'cancelled';
-    const currentSearchUnavailable = requestStatus === 'api-failure'
-      && item.requestError === 'current-information-unavailable';
     const messageKey = item.id;
     const previousMessageKey = messageKeysRef.current.get(item.id);
     const messageKeyChanged = previousMessageKey !== undefined && previousMessageKey !== messageKey;
@@ -558,34 +620,8 @@ export default function ChatScreen() {
     if (isFailed && !isUser && !item.content.trim()) {
       return (
         <View style={[styles.msgWrapper, styles.msgAi]}>
-          <View style={[styles.msgBubble, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm }}>
-              <Ionicons name="warning-outline" size={18} color={colors.error} />
-              <ThemedText variant="body" weight="semiBold" style={{ marginLeft: 8, color: colors.error }}>
-                {requestStatus === 'offline' ? 'Offline'
-                  : requestStatus === 'cancelled' ? 'Response stopped'
-                    : currentSearchUnavailable ? 'Current info unavailable' : 'Connection failed'}
-              </ThemedText>
-            </View>
-            <ThemedText variant="bodySm" color="secondary" style={{ marginBottom: Spacing.md }}>
-              {requestStatus === 'offline'
-                ? 'You appear to be offline. Check your connection and try again.'
-                : requestStatus === 'cancelled'
-                  ? 'Generation was stopped. Your prompt is preserved.'
-                  : currentSearchUnavailable
-                    ? 'Current web information is temporarily unavailable.'
-                  : 'The Kalillac mock server did not respond.'}
-            </ThemedText>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => handleRetryMessage(item)}
-              style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, backgroundColor: colors.surfaceSecondary, borderRadius: Radii.full }}
-              accessibilityRole="button"
-              accessibilityLabel="Retry failed response"
-            >
-              <ThemedText variant="bodySm" weight="medium">Retry</ThemedText>
-            </TouchableOpacity>
-          </View>
+          <ResponseNotice message={item} disabled={isGenerating || !!editing} onRetry={() => handleRetryMessage(item)}
+            onReviewConsent={reviewAIProcessing} />
         </View>
       );
     }
@@ -694,6 +730,12 @@ export default function ChatScreen() {
               ))}
             </View>
           )}
+          {!isUser && item.isStreaming && !item.content && (
+            <View style={styles.waitingState} accessibilityLiveRegion="polite">
+              <ActivityIndicator size="small" color={colors.accent} />
+              <ThemedText variant="bodySm" color="secondary">Kalillac is responding…</ThemedText>
+            </View>
+          )}
           {!!item.content && (
             <Markdown
               rules={markdownRules}
@@ -743,6 +785,11 @@ export default function ChatScreen() {
           )}
         </View>
 
+        {!isUser && isFailed && !!item.content.trim() && (
+          <ResponseNotice message={item} disabled={isGenerating || !!editing} onRetry={() => handleRetryMessage(item)}
+            onReviewConsent={reviewAIProcessing} />
+        )}
+
         {!isUser && item.sources && item.sources.length > 0 && (
           <View style={styles.sourcesSection} testID={`message-sources-${item.id}`}>
             <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sourcesHeading}>
@@ -773,16 +820,33 @@ export default function ChatScreen() {
           </View>
         )}
         
-        {!isUser && !item.isStreaming && (
+        {!item.isStreaming && (
+          <View style={[styles.msgActions, isUser && { alignSelf: 'flex-end' }]}>
+            <TouchableOpacity
+              onPress={() => setActionMessageId(actionMessageId === item.id ? null : item.id)}
+              style={styles.actionBtn} activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={isUser ? 'Actions for your message' : 'Actions for Kalillac response'}
+              accessibilityState={{ expanded: actionMessageId === item.id }}
+              testID={`message-actions-${item.id}`}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+            {copyFeedback?.messageId === item.id && (
+              <ThemedText variant="caption" color="secondary" accessibilityLiveRegion="polite">{copyFeedback.text}</ThemedText>
+            )}
+          </View>
+        )}
+        {!isUser && !item.isStreaming && actionMessageId === item.id && (
           <View style={styles.msgActions}>
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={() => handleCopy(customerVisibleAssistantText(item.content))}
+              onPress={() => void handleCopy(item)}
               style={styles.actionBtn}
               accessibilityRole="button"
-              accessibilityLabel="Copy message"
+              accessibilityLabel="Copy response"
             >
               <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
+              <ThemedText variant="caption">Copy</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
               activeOpacity={0.7}
@@ -792,32 +856,42 @@ export default function ChatScreen() {
               accessibilityLabel="Share message"
             >
               <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+              <ThemedText variant="caption">Share</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
               activeOpacity={0.7}
               onPress={() => handleRegenerate(item)}
               onPressIn={() => logAssistantDiagnostic('regenerate_touch_started', { assistantMessageId: item.id })}
-              disabled={isGenerating}
-              style={styles.actionBtn}
+              disabled={isGenerating || !!editing}
+              style={[styles.actionBtn, { opacity: isGenerating || editing ? 0.4 : 1 }]}
               accessibilityRole="button"
               accessibilityLabel="Regenerate response"
-              accessibilityState={{ disabled: isGenerating }}
+              accessibilityState={{ disabled: isGenerating || !!editing }}
             >
               <Ionicons name="refresh-outline" size={18} color={colors.textSecondary} />
+              <ThemedText variant="caption">Regenerate</ThemedText>
             </TouchableOpacity>
           </View>
         )}
         
-        {isUser && !isGenerating && (
+        {isUser && actionMessageId === item.id && (
           <View style={[styles.msgActions, { alignSelf: 'flex-end', marginRight: 4 }]}>
+            <TouchableOpacity onPress={() => void handleCopy(item)} style={styles.actionBtn}
+              activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Copy your message">
+              <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
+              <ThemedText variant="caption">Copy</ThemedText>
+            </TouchableOpacity>
             <TouchableOpacity 
               activeOpacity={0.7}
               onPress={() => handleEdit(item.id, item.content)} 
               style={styles.actionBtn}
               accessibilityRole="button"
               accessibilityLabel="Edit message"
+              disabled={isGenerating}
+              accessibilityState={{ disabled: isGenerating }}
             >
               <Ionicons name="pencil-outline" size={16} color={colors.textTertiary} />
+              <ThemedText variant="caption">Edit & resend</ThemedText>
             </TouchableOpacity>
           </View>
         )}
@@ -930,7 +1004,9 @@ export default function ChatScreen() {
           </View>
         )}
 
+        <View style={{ flex: 1 }}>
         <FlatList
+          ref={messageListRef}
           testID="chat-message-list"
           style={{ flex: 1 }}
           data={[...session.messages].reverse()}
@@ -941,16 +1017,60 @@ export default function ChatScreen() {
           contentContainerStyle={session.messages.length === 0 ? styles.emptyListContent : styles.listContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          onScroll={event => setShowLatest(shouldShowLatest(event.nativeEvent.contentOffset.y, session.messages.length))}
+          scrollEventThrottle={100}
           ListEmptyComponent={(
             <View style={[styles.emptyState, { transform: [{ scaleY: -1 }] }]}>
               <ThemedText variant="body" color="secondary" align="center">
-                Start a {task?.toLowerCase() || 'new'} conversation.
+                What would you like to {task ? task.toLowerCase() : 'explore'}?
+              </ThemedText>
+              <ThemedText variant="bodySm" color="secondary" align="center" style={{ marginTop: Spacing.sm }}>
+                Ask a question below. Kalillac can search when you need current information.
               </ThemedText>
             </View>
           )}
         />
+        {showLatest && (
+          <TouchableOpacity onPress={() => {
+            messageListRef.current?.scrollToOffset({ offset: 0, animated: false });
+            setShowLatest(false);
+          }} style={[styles.latestButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Scroll to latest message">
+            <Ionicons name="arrow-down" size={16} color={colors.text} />
+            <ThemedText variant="bodySm">Latest</ThemedText>
+          </TouchableOpacity>
+        )}
+        </View>
 
         <View style={[styles.inputContainer, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
+          {(consent.state !== 'allowed' || consent.persistence === 'session-only' || consent.persistence === 'unavailable') && (
+            <View style={[styles.editBanner, { backgroundColor: colors.surfaceSecondary }]}>
+              <View style={{ flex: 1 }} accessibilityLiveRegion="polite">
+                <ThemedText variant="bodySm" weight="semiBold">
+                  {consent.state === 'allowed' ? 'AI processing allowed for this session' : 'AI processing needs your permission'}
+                </ThemedText>
+                <ThemedText variant="caption" color="secondary">
+                  {consentStorageNotice(consent) ?? 'Review external processing before requesting an AI response.'}
+                </ThemedText>
+              </View>
+              <TouchableOpacity onPress={reviewAIProcessing} accessibilityRole="button"
+                accessibilityLabel="Review AI processing" style={styles.actionBtn}>
+                <ThemedText variant="bodySm" color="accent">Review</ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
+          {editing && (
+            <View style={[styles.editBanner, { backgroundColor: colors.surfaceSecondary }]}>
+              <View style={{ flex: 1 }} accessibilityLiveRegion="polite">
+                <ThemedText variant="bodySm" weight="semiBold">Editing your message</ThemedText>
+                <ThemedText variant="caption" color="secondary">Resending replaces later messages. Your saved copy stays unchanged.</ThemedText>
+              </View>
+              <TouchableOpacity onPress={handleCancelEdit} accessibilityRole="button" accessibilityLabel="Cancel editing"
+                style={styles.actionBtn}>
+                <ThemedText variant="bodySm" style={{ color: colors.accent }}>Cancel</ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
           {/* Mode Selector */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeSelectorRow}>
             {['Auto', 'Fast', 'Smart', 'Deep'].map((mode) => (
@@ -961,9 +1081,10 @@ export default function ChatScreen() {
                   if (hapticsEnabled) Haptics.selectionAsync();
                   setActiveMode(mode as AIModelMode);
                 }}
+                disabled={isGenerating}
                 accessibilityRole="button"
-                accessibilityState={{ selected: activeMode === mode }}
-                accessibilityLabel={`${mode} mode`}
+                accessibilityState={{ selected: activeMode === mode, disabled: isGenerating }}
+                accessibilityLabel={`${mode} mode, ${MODE_DESCRIPTIONS[mode as AIModelMode]}`}
                 style={[
                   styles.modeBtn, 
                   activeMode === mode ? { backgroundColor: colors.accent } : { backgroundColor: colors.surfaceSecondary }
@@ -975,6 +1096,10 @@ export default function ChatScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
+          <ThemedText variant="caption" color="secondary" style={{ marginBottom: Spacing.sm }}
+            accessibilityLiveRegion="polite">
+            {isGenerating ? 'Responding · Stop anytime' : `${activeMode} · ${MODE_DESCRIPTIONS[activeMode]}`}
+          </ThemedText>
 
           <View style={[styles.inputBox, { backgroundColor: colors.surface, borderColor: isInputFocused ? colors.accent : colors.border }]}>
             {attachments.length > 0 && (
@@ -1012,12 +1137,14 @@ export default function ChatScreen() {
                   { color: colors.text, paddingLeft: __DEV__ ? 0 : Spacing.md },
                   Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : undefined,
                 ]}
-                placeholder="Ask Kalillac..."
+                placeholder={editing ? 'Edit your message…' : 'Ask Kalillac…'}
+                accessibilityLabel={editing ? 'Edit your message' : 'Message'}
+                accessibilityHint="Multiple lines are supported. Use the send button when ready."
                 placeholderTextColor={colors.textTertiary}
                 value={input}
                 onChangeText={setInput}
                 multiline
-                maxLength={2000}
+                scrollEnabled
                 onFocus={() => setIsInputFocused(true)}
                 onBlur={() => setIsInputFocused(false)}
                 selectionColor={colors.accent}
@@ -1028,6 +1155,7 @@ export default function ChatScreen() {
                   activeOpacity={0.7}
                   style={styles.sendBtn} 
                   onPress={handleStop}
+                  accessibilityRole="button"
                   accessibilityLabel="Stop generating"
                 >
                   <Ionicons name="stop-circle" size={28} color={colors.error} />
@@ -1038,7 +1166,8 @@ export default function ChatScreen() {
                   style={styles.sendBtn} 
                   onPress={handleSend} 
                   disabled={!input.trim() && attachments.length === 0}
-                  accessibilityLabel="Send message"
+                  accessibilityRole="button"
+                  accessibilityLabel={editing ? 'Resend edited message' : 'Send message'}
                   accessibilityState={{ disabled: !input.trim() && attachments.length === 0 }}
                 >
                   <View style={[styles.sendIconWrapper, { backgroundColor: (input.trim() || attachments.length > 0) ? colors.accent : colors.surfaceSecondary }]}>
@@ -1048,6 +1177,11 @@ export default function ChatScreen() {
               )}
             </View>
           </View>
+          {input.length > 2000 && (
+            <ThemedText variant="caption" color="secondary" style={{ marginTop: Spacing.xs }}>
+              {input.length.toLocaleString()} characters · Long draft
+            </ThemedText>
+          )}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -1056,6 +1190,11 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  unavailableState: { alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: Spacing.md },
+  noticeButton: { minHeight: 44, paddingHorizontal: Spacing.md, justifyContent: 'center' },
+  waitingState: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 44 },
+  editBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, padding: Spacing.sm, borderRadius: Radii.md, marginBottom: Spacing.sm },
+  latestButton: { position: 'absolute', right: Spacing.md, bottom: Spacing.sm, minHeight: 44, paddingHorizontal: Spacing.md, borderRadius: Radii.full, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   listContent: { padding: Spacing.md, gap: Spacing.md },
   emptyListContent: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: Spacing.md },
   emptyState: { paddingBottom: Spacing.md },
@@ -1064,12 +1203,12 @@ const styles = StyleSheet.create({
   msgAi: { alignSelf: 'flex-start', width: '100%', minWidth: 0 },
   msgBubble: { paddingHorizontal: Spacing.md, paddingVertical: 12, borderRadius: Radii.xl },
   msgAiBubble: { paddingHorizontal: 0, paddingVertical: 4, borderRadius: 0, backgroundColor: 'transparent' },
-  msgActions: { flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: 4 },
+  msgActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: 4 },
   sourcesSection: { marginTop: Spacing.sm, marginLeft: 4, maxWidth: '100%' },
   sourcesHeading: { marginBottom: 4 },
-  sourceRow: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', paddingVertical: 4, paddingRight: Spacing.md },
+  sourceRow: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingVertical: 6, paddingRight: Spacing.md },
   sourceDomain: { marginTop: 1 },
-  actionBtn: { padding: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  actionBtn: { padding: 4, minWidth: 44, minHeight: 44, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
   headerTitleContainer: { minWidth: 0, justifyContent: 'center' },
   headerTitleText: { flexShrink: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', paddingRight: Spacing.xs },

@@ -5,9 +5,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { Spacing, Radii } from '@/constants/Theme';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { router } from 'expo-router';
+import { useAIProcessingConsent } from '@/hooks/useAIProcessingConsent';
+import { consentStatusLabel, consentStorageNotice } from '@/services/aiProcessingConsentState';
 
 export default function PrivacyScreen() {
   const { colors } = usePreferences();
+  const consent = useAIProcessingConsent();
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -26,6 +29,26 @@ export default function PrivacyScreen() {
           This explains the Milestone 2A development connection. It is not a final legal policy or production security guarantee.
         </ThemedText>
 
+        <View style={[styles.section, { backgroundColor: colors.surfaceSecondary }]}>
+          <ThemedText variant="body" weight="semiBold" style={styles.sectionTitle}>AI processing permission</ThemedText>
+          <ThemedText variant="bodySm" color="secondary" style={styles.sectionText} accessibilityLiveRegion="polite">
+            This device: {consentStatusLabel(consent)}. External processing through Kalillac’s backend is required for AI responses. Permission is separate from finishing the introduction. Turning it off does not delete local Saved chats.
+          </ThemedText>
+          {!!consentStorageNotice(consent) && (
+            <ThemedText variant="bodySm" color="secondary" style={styles.sectionText} accessibilityLiveRegion="polite">
+              {consentStorageNotice(consent)}
+            </ThemedText>
+          )}
+          <TouchableOpacity onPress={() => router.push({ pathname: '/onboarding', params: { revisit: '1' } })}
+            accessibilityRole="button" accessibilityLabel="Review AI processing" style={styles.reviewButton}>
+            <ThemedText variant="bodySm" color="accent">Review AI processing</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/providers')} accessibilityRole="link"
+            accessibilityLabel="View current AI provider disclosure" style={styles.reviewButton}>
+            <ThemedText variant="bodySm" color="accent">Current provider disclosure</ThemedText>
+          </TouchableOpacity>
+        </View>
+
         <Section title="Temporary Chats">
           Application messages and attachments stay in memory only. End Chat releases the current conversation. Reloading clears them. There is no backend session. (Not a guarantee of forensic OS memory erasure).
         </Section>
@@ -36,6 +59,10 @@ export default function PrivacyScreen() {
 
         <Section title="Providers">
           Text submitted for a response is sent to the Kalillac backend and its development OpenRouter provider. Kalillac does not persist prompts, responses, or transcripts, but the provider's own retention terms are not a production privacy guarantee.
+        </Section>
+
+        <Section title="Current Web Information">
+          When a question needs fresh information, Kalillac may search public web sources. The search query is sent to the search provider, and cited sources appear with the reply.
         </Section>
 
         <Section title="Other Boundaries">
@@ -63,6 +90,7 @@ const styles = StyleSheet.create({
   closeBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   title: { marginBottom: Spacing.sm },
   subtitle: { marginBottom: Spacing.xl, lineHeight: 22 },
+  reviewButton: { minHeight: 44, justifyContent: 'center', paddingVertical: Spacing.sm },
   section: {
     padding: Spacing.md,
     borderRadius: Radii.lg,

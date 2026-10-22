@@ -157,7 +157,12 @@ describe('local response / code viewport regression contracts', () => {
     expect(chatSource).toContain('keyExtractor={item => item.id}');
     expect(chatSource).toContain('removeClippedSubviews={false}');
     expect(chatSource).toMatch(/<FlatList[\s\S]*?\binverted\b/);
-    expect(chatSource).not.toMatch(/scrollToEnd|scrollToOffset|getItemLayout/);
+    expect(chatSource).not.toMatch(/scrollToEnd|getItemLayout/);
+    // 4A allows only an explicit Latest tap, not content/layout-driven scrolling.
+    expect(chatSource.match(/scrollToOffset/g)).toHaveLength(1);
+    expect(chatSource).toContain('messageListRef.current?.scrollToOffset({ offset: 0, animated: false })');
+    expect(chatSource).toContain('accessibilityLabel="Scroll to latest message"');
+    expect(chatSource).not.toContain('onContentSizeChange');
     expect(chatSource.match(/<MarkdownCodeBlock\b/g)).toHaveLength(2);
   });
 

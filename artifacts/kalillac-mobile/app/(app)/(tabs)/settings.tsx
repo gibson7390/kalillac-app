@@ -10,12 +10,15 @@ import { Spacing, Radii } from '@/constants/Theme';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { nativeDiagnostics } from '@/dev/nativeDiagnostics';
+import { useAIProcessingConsent } from '@/hooks/useAIProcessingConsent';
+import { consentStatusLabel, consentStorageNotice } from '@/services/aiProcessingConsentState';
 
 export default function SettingsTab() {
   const { colors, themeMode, setThemeMode, hapticsEnabled, setHapticsEnabled, reduceMotion, setReduceMotion, offlineMode, setOfflineMode, apiErrorMode, setApiErrorMode } = usePreferences();
   const { status } = useSubscription();
   const { clearAllTemporary, corruptRandomSession, savedSessions, createSession, addMessage } = useChatRepository();
   const insets = useSafeAreaInsets();
+  const consent = useAIProcessingConsent();
 
   const startLocalFixture = (kind: 'short' | 'long-code' | 'mixed') => {
     if (!__DEV__) return;
@@ -88,15 +91,34 @@ export default function SettingsTab() {
         <View style={styles.section}>
           <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>PRIVACY & DATA</ThemedText>
           <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/privacy')}>
-              <ThemedText variant="body">Privacy Policy</ThemedText>
+            <TouchableOpacity activeOpacity={0.7} accessibilityRole="button"
+              accessibilityLabel={`AI processing, ${consentStatusLabel(consent)}, review permission`}
+              style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
+              onPress={() => router.push({ pathname: '/onboarding', params: { revisit: '1' } })}>
+              <View style={{ flex: 1 }}>
+                <ThemedText variant="body">AI processing</ThemedText>
+                <ThemedText variant="caption" color="secondary">{consentStatusLabel(consent)} · Review or change</ThemedText>
+                {!!consentStorageNotice(consent) && (
+                  <ThemedText variant="caption" color="secondary" accessibilityLiveRegion="polite">
+                    {consentStorageNotice(consent)}
+                  </ThemedText>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="How Kalillac works, reopen introduction" style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push({ pathname: '/onboarding', params: { revisit: '1' } })}>
+              <ThemedText variant="body">How Kalillac Works</ThemedText>
               <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.7} style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/providers')}>
+            <TouchableOpacity activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Privacy" style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/privacy')}>
+              <ThemedText variant="body">Privacy</ThemedText>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.7} style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} accessibilityRole="button" accessibilityLabel="AI Providers" onPress={() => router.push('/providers')}>
               <ThemedText variant="body">AI Providers</ThemedText>
               <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.lastRow]} onPress={handleClearTemp}>
+            <TouchableOpacity activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Clear temporary chats" style={[styles.row, styles.lastRow]} onPress={handleClearTemp}>
               <ThemedText variant="body" color="error">Clear Temporary Chats</ThemedText>
             </TouchableOpacity>
           </View>
