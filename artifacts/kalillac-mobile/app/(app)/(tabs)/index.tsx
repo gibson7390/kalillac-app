@@ -40,7 +40,7 @@ export default function HomeTab() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom + 20, 100) }]}>
         <View style={styles.header}>
-          <BrandLockup compact />
+          <BrandLockup compact showMark />
           <ThemedText variant="bodySm" color="secondary" style={styles.subtitle}>Your private workspace</ThemedText>
         </View>
 

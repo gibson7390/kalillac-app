@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, StyleSheet, ActivityIndicator, ViewStyle, StyleProp } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from './ThemedText';
-import { Radii, Spacing } from '@/constants/Theme';
+import { Radii, Spacing, Controls } from '@/constants/Theme';
 import * as Haptics from 'expo-haptics';
 
 interface ButtonProps {
@@ -68,10 +68,11 @@ export function Button({
 
   const getHeight = () => {
     switch (size) {
-      case 'sm': return 36;
-      case 'lg': return 52;
+      // sm keeps a compact look but never drops below the shared touch target.
+      case 'sm': return Controls.minTarget;
+      case 'lg': return Controls.height + 4;
       case 'md':
-      default: return 44;
+      default: return Controls.height;
     }
   };
 
@@ -82,13 +83,15 @@ export function Button({
       activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel || title}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       style={[
         styles.base,
         {
           backgroundColor: getBgColor(),
           borderColor: getBorderColor(),
           borderWidth: variant === 'outline' ? 1 : 0,
-          height: getHeight(),
+          minHeight: getHeight(),
+          paddingVertical: Spacing.sm,
           paddingHorizontal: size === 'sm' ? Spacing.md : Spacing.xl,
         },
         style,
@@ -102,7 +105,7 @@ export function Button({
           <ThemedText
             variant="button"
             weight="medium"
-            style={{ color: getTextColor(), marginLeft: icon ? Spacing.sm : 0 }}
+            style={{ color: getTextColor(), marginLeft: icon ? Controls.gap : 0, textAlign: 'center', flexShrink: 1 }}
           >
             {title}
           </ThemedText>

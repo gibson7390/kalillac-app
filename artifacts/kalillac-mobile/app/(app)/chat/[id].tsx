@@ -16,7 +16,7 @@ import {
 } from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { Spacing, Radii } from '@/constants/Theme';
+import { Spacing, Radii, Controls } from '@/constants/Theme';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Markdown, { ASTNode } from '@ronradtke/react-native-markdown-display';
 import { generateId } from '@/utils/uuid';
@@ -1087,10 +1087,11 @@ export default function ChatScreen() {
                 accessibilityLabel={`${mode} mode, ${MODE_DESCRIPTIONS[mode as AIModelMode]}`}
                 style={[
                   styles.modeBtn, 
-                  activeMode === mode ? { backgroundColor: colors.accent } : { backgroundColor: colors.surfaceSecondary }
+                  activeMode === mode ? { backgroundColor: colors.accent, borderColor: colors.accent } : { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                  isGenerating && activeMode !== mode && styles.modeBtnDisabled,
                 ]}
               >
-                <ThemedText variant="bodySm" weight="medium" style={{ color: activeMode === mode ? colors.textBubbleUser : colors.textSecondary }}>
+                <ThemedText variant="bodySm" weight={activeMode === mode ? 'semiBold' : 'medium'} style={{ color: activeMode === mode ? colors.textBubbleUser : colors.textSecondary }}>
                   {mode}
                 </ThemedText>
               </TouchableOpacity>
@@ -1191,10 +1192,10 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   unavailableState: { alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: Spacing.md },
-  noticeButton: { minHeight: 44, paddingHorizontal: Spacing.md, justifyContent: 'center' },
-  waitingState: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 44 },
-  editBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, padding: Spacing.sm, borderRadius: Radii.md, marginBottom: Spacing.sm },
-  latestButton: { position: 'absolute', right: Spacing.md, bottom: Spacing.sm, minHeight: 44, paddingHorizontal: Spacing.md, borderRadius: Radii.full, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  noticeButton: { minHeight: Controls.minTarget, paddingHorizontal: Spacing.md, justifyContent: 'center' },
+  waitingState: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: Controls.minTarget },
+  editBanner: { flexDirection: 'row', alignItems: 'center', gap: Controls.gap, padding: Spacing.sm, borderRadius: Controls.radius, marginBottom: Spacing.sm },
+  latestButton: { position: 'absolute', right: Spacing.md, bottom: Spacing.sm, minHeight: Controls.minTarget, paddingHorizontal: Spacing.md, borderRadius: Radii.full, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   listContent: { padding: Spacing.md, gap: Spacing.md },
   emptyListContent: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: Spacing.md },
   emptyState: { paddingBottom: Spacing.md },
@@ -1206,22 +1207,23 @@ const styles = StyleSheet.create({
   msgActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: 4 },
   sourcesSection: { marginTop: Spacing.sm, marginLeft: 4, maxWidth: '100%' },
   sourcesHeading: { marginBottom: 4 },
-  sourceRow: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingVertical: 6, paddingRight: Spacing.md },
+  sourceRow: { alignSelf: 'flex-start', minHeight: Controls.minTarget, justifyContent: 'center', paddingVertical: 6, paddingRight: Spacing.md },
   sourceDomain: { marginTop: 1 },
-  actionBtn: { padding: 4, minWidth: 44, minHeight: 44, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
+  actionBtn: { padding: 4, minWidth: Controls.minTarget, minHeight: Controls.minTarget, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
   headerTitleContainer: { minWidth: 0, justifyContent: 'center' },
   headerTitleText: { flexShrink: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', paddingRight: Spacing.xs },
-  headerBtn: { padding: Spacing.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { padding: Spacing.xs, minWidth: Controls.minTarget, minHeight: Controls.minTarget, alignItems: 'center', justifyContent: 'center' },
   inputContainer: { padding: Spacing.md, paddingTop: Spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
-  modeSelectorRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
-  modeBtn: { paddingHorizontal: Spacing.md, minHeight: 44, justifyContent: 'center', borderRadius: Radii.full },
+  modeSelectorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Controls.gap, marginBottom: Spacing.sm },
+  modeBtn: { paddingHorizontal: Spacing.md, minHeight: Controls.minTarget, justifyContent: 'center', borderRadius: Radii.full, borderWidth: StyleSheet.hairlineWidth },
+  modeBtnDisabled: { opacity: 0.55 },
   inputBox: { borderRadius: Radii.xl, borderWidth: 1 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 4 },
   attachmentsPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, padding: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   attachmentChip: { flexDirection: 'row', alignItems: 'center', padding: 4, paddingHorizontal: 8, borderRadius: Radii.sm },
-  attachBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingBottom: 10 },
-  input: { flex: 1, minHeight: 44, maxHeight: 120, paddingTop: 12, paddingBottom: 12, fontSize: 16, lineHeight: 22 },
-  sendBtn: { padding: Spacing.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingBottom: 6 },
+  attachBtn: { padding: Spacing.sm, minWidth: Controls.minTarget, minHeight: Controls.minTarget, alignItems: 'center', justifyContent: 'center', paddingBottom: 10 },
+  input: { flex: 1, minHeight: Controls.minTarget, maxHeight: 120, paddingTop: 12, paddingBottom: 12, fontSize: 16, lineHeight: 22 },
+  sendBtn: { padding: Spacing.xs, minWidth: Controls.minTarget, minHeight: Controls.minTarget, alignItems: 'center', justifyContent: 'center', paddingBottom: 6 },
   sendIconWrapper: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 });

@@ -43,7 +43,7 @@ export default function OnboardingScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top + Spacing.md, paddingBottom: Math.max(insets.bottom, Spacing.lg) }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <BrandLockup />
+        <BrandLockup showMark />
         <ThemedText variant="h1" accessibilityRole="header" style={styles.headline}>Private by default.</ThemedText>
         <ThemedText variant="body" color="secondary" style={styles.lead}>
           AI responses require external processing. Choose whether to allow it.

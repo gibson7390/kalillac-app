@@ -4,17 +4,31 @@
     "slug": "kalillac-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/brand/icon-placeholder.png",
     "scheme": "kalillac-mobile",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "icon": "./assets/brand/icon-placeholder.png"
     },
-    "android": {},
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/icon-foreground-placeholder.png",
+        "backgroundColor": "#F7F8F9"
+      }
+    },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/brand/favicon-placeholder.png"
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      ["expo-splash-screen", {
+        "backgroundColor": "#F7F8F9",
+        "dark": {
+          "backgroundColor": "#0B0D12"
+        }
+      }]
+    ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

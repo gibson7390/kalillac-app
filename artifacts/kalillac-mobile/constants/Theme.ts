@@ -73,3 +73,11 @@ export const Radii = {
   xl: 20,
   full: 9999,
 };
+
+/** Shared control sizing to reduce drift across screens. */
+export const Controls = {
+  minTarget: 44,
+  height: 48,
+  radius: Radii.md,
+  gap: Spacing.sm,
+};

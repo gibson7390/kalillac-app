@@ -9,7 +9,7 @@ import {
 } from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { Spacing, Radii } from '@/constants/Theme';
+import { Spacing, Radii, Controls } from '@/constants/Theme';
 import { router, useFocusEffect } from 'expo-router';
 import { Button } from '@/components/Button';
 import * as Haptics from 'expo-haptics';
@@ -178,6 +178,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Spacing.xs,
+    minHeight: Controls.minTarget + Spacing.md,
   },
   itemTouch: {
     flex: 1,
@@ -195,8 +196,8 @@ const styles = StyleSheet.create({
   },
   itemContent: { flex: 1, paddingRight: Spacing.md },
   deleteBtn: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: Controls.minTarget,
+    minHeight: Controls.minTarget,
     padding: Spacing.md,
     alignItems: 'center',
     justifyContent: 'center',

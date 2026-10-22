@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { ThemedText } from '@/components/ThemedText';
-import { Spacing, Radii } from '@/constants/Theme';
+import { Spacing, Radii, Controls } from '@/constants/Theme';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { router } from 'expo-router';
 import { useAIProcessingConsent } from '@/hooks/useAIProcessingConsent';
@@ -87,15 +87,15 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
   closeRow: { alignItems: 'flex-end', marginBottom: Spacing.md },
-  closeBtn: { padding: Spacing.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  closeBtn: { padding: Spacing.sm, minWidth: Controls.minTarget, minHeight: Controls.minTarget, alignItems: 'center', justifyContent: 'center' },
   title: { marginBottom: Spacing.sm },
   subtitle: { marginBottom: Spacing.xl, lineHeight: 22 },
-  reviewButton: { minHeight: 44, justifyContent: 'center', paddingVertical: Spacing.sm },
+  reviewButton: { minHeight: Controls.minTarget, justifyContent: 'center', paddingVertical: Spacing.sm },
   section: {
     padding: Spacing.md,
     borderRadius: Radii.lg,
     marginBottom: Spacing.md,
   },
   sectionTitle: { marginBottom: Spacing.xs },
-  sectionText: { lineHeight: 20 },
+  sectionText: { lineHeight: 21 },
 });

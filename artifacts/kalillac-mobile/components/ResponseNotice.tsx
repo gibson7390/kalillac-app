@@ -4,7 +4,7 @@ import { usePreferences } from '../contexts/PreferencesContext';
 import { ThemedText } from './ThemedText';
 import { chatErrorPresentation } from '../utils/chatErrorPresentation';
 import type { ChatMessage } from '../contexts/ChatRepositoryContext';
-import { Radii, Spacing } from '../constants/Theme';
+import { Radii, Spacing, Controls } from '../constants/Theme';
 import { AI_CONSENT_REQUIRED } from '../services/aiProcessingConsentState';
 
 export function ResponseNotice({ message, disabled, onRetry, onReviewConsent }: {
@@ -36,6 +36,6 @@ export function ResponseNotice({ message, disabled, onRetry, onReviewConsent }: 
   );
 }
 const styles = StyleSheet.create({
-  notice: { padding: Spacing.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radii.md, marginTop: Spacing.sm },
-  retry: { minHeight: 44, paddingHorizontal: Spacing.sm, justifyContent: 'center', alignSelf: 'flex-start', marginTop: 4 },
+  notice: { padding: Spacing.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: Controls.radius, marginTop: Spacing.sm },
+  retry: { minHeight: Controls.minTarget, paddingHorizontal: Spacing.sm, justifyContent: 'center', alignSelf: 'flex-start', marginTop: 4 },
 });

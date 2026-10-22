@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { regenerationPlan, startRegeneration } from '../utils/regeneration';
 import type { ChatMessage } from '../contexts/ChatRepositoryContext';
+import { Controls } from '../constants/Theme';
 
 const messages: ChatMessage[] = [
   { id: 'u1', role: 'user', content: 'First prompt' },
@@ -62,7 +63,8 @@ describe('targeted regeneration / retry', () => {
     const source = readFileSync(resolve(__dirname, '../app/(app)/chat/[id].tsx'), 'utf8');
     expect(source).toContain('onPress={() => handleRegenerate(item)}');
     expect(source).toContain('regenerate_touch_started');
-    expect(source).toContain('minWidth: 44, minHeight: 44');
+    expect(source).toContain('minWidth: Controls.minTarget, minHeight: Controls.minTarget');
+    expect(Controls.minTarget).toBeGreaterThanOrEqual(44);
     expect(source).toContain('regenerate_pressed');
     expect(source).toContain('regenerate_first_delta');
     expect(source).toContain('regenerate_backend_request_started');

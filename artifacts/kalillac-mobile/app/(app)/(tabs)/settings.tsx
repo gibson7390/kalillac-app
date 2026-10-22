@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Switch, TouchableOpacity, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useChatRepository } from '@/contexts/ChatRepositoryContext';
 import { ThemedText } from '@/components/ThemedText';
+import { BrandMark } from '@/components/BrandLockup';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { Spacing, Radii } from '@/constants/Theme';
+import { Spacing, Radii, Controls } from '@/constants/Theme';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { nativeDiagnostics } from '@/dev/nativeDiagnostics';
@@ -19,6 +20,7 @@ export default function SettingsTab() {
   const { clearAllTemporary, corruptRandomSession, savedSessions, createSession, addMessage } = useChatRepository();
   const insets = useSafeAreaInsets();
   const consent = useAIProcessingConsent();
+  const [devOpen, setDevOpen] = useState(false);
 
   const startLocalFixture = (kind: 'short' | 'long-code' | 'mixed') => {
     if (!__DEV__) return;
@@ -38,22 +40,13 @@ export default function SettingsTab() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom + 20, 100) }]}>
-        <ThemedText variant="h2" weight="semiBold" style={styles.header}>Settings</ThemedText>
-
-        {__DEV__ && (
-          <View style={styles.section}>
-            <TouchableOpacity activeOpacity={0.7} style={[styles.row, styles.firstRow, styles.lastRow, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]} onPress={() => router.push('/paywall')}>
-              <View style={styles.rowIcon}><Ionicons name="star" size={20} color={colors.accent} /></View>
-              <View style={{ flex: 1 }}>
-                <ThemedText variant="body" weight="medium">Kalillac Plus</ThemedText>
-                <ThemedText variant="caption" color="secondary">
-                  {status === 'plus' ? 'Active Subscription' : 'Upgrade for advanced models (Demo)'}
-                </ThemedText>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-            </TouchableOpacity>
+        <View style={styles.header}>
+          <BrandMark size={32} />
+          <View style={styles.headerText}>
+            <ThemedText variant="h2" weight="semiBold">Settings</ThemedText>
+            <ThemedText variant="caption" color="secondary">Kalillac AI · private by default</ThemedText>
           </View>
-        )}
+        </View>
 
         <View style={styles.section}>
           <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>PREFERENCES</ThemedText>
@@ -126,9 +119,31 @@ export default function SettingsTab() {
 
         {__DEV__ && (
           <View style={styles.section}>
-            <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.sectionTitle}>DEVELOPER / DEMO</ThemedText>
-            <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.row, styles.firstRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: devOpen }}
+              accessibilityLabel="Developer and demo controls"
+              accessibilityHint={devOpen ? 'Collapses development-only controls' : 'Shows development-only controls'}
+              onPress={() => setDevOpen(v => !v)}
+              style={styles.devToggle}
+            >
+              <ThemedText variant="caption" weight="semiBold" color="secondary" style={styles.devToggleLabel}>DEVELOPER / DEMO · BUILD ONLY</ThemedText>
+              <Ionicons name={devOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            {devOpen && (
+            <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border, borderStyle: 'dashed' }]}>
+              <TouchableOpacity activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Kalillac Plus demo upgrade" style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]} onPress={() => router.push('/paywall')}>
+              <View style={styles.rowIcon}><Ionicons name="star" size={20} color={colors.accent} /></View>
+              <View style={{ flex: 1 }}>
+                <ThemedText variant="body" weight="medium">Kalillac Plus</ThemedText>
+                <ThemedText variant="caption" color="secondary">
+                  {status === 'plus' ? 'Active Subscription' : 'Upgrade for advanced models (Demo)'}
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
+              <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
                 <ThemedText variant="body">Simulate Offline Mode</ThemedText>
                 <Switch 
                   value={offlineMode} 
@@ -184,6 +199,7 @@ export default function SettingsTab() {
                 <ThemedText variant="body">Clear native diagnostics only</ThemedText>
               </TouchableOpacity>
             </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -194,7 +210,10 @@ export default function SettingsTab() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { padding: Spacing.lg },
-  header: { marginBottom: Spacing.lg },
+  header: { marginBottom: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm + Spacing.xs },
+  headerText: { flexShrink: 1 },
+  devToggle: { minHeight: Controls.minTarget, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.sm, marginBottom: Spacing.sm },
+  devToggleLabel: { letterSpacing: 0.5, flexShrink: 1 },
   section: { marginBottom: Spacing.xl },
   sectionTitle: { marginBottom: Spacing.sm, marginLeft: Spacing.sm, letterSpacing: 0.5 },
   group: { borderRadius: Radii.lg, borderWidth: 1, overflow: 'hidden' },
@@ -202,6 +221,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Controls.gap,
+    minHeight: Controls.minTarget + Spacing.sm,
     padding: Spacing.md,
   },
   firstRow: { borderTopLeftRadius: Radii.lg, borderTopRightRadius: Radii.lg },
