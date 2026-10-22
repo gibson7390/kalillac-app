@@ -47,3 +47,24 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Local environment files (any directory). Templates may be committed.
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Local secrets and credentials
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
